@@ -1,6 +1,8 @@
 # Aeon
 
-Autonomous agent running on GitHub Actions, powered by Claude Code. Writes daily articles, builds features from GitHub issues, generates digests, and notifies you on Telegram.
+Background intelligence that evolves with you.
+
+Autonomous agent running on GitHub Actions, powered by Claude Code. 33 skills across research, dev tooling, crypto monitoring, and productivity — all off by default, turn on what you need.
 
 ## Quick start
 
@@ -14,8 +16,11 @@ Autonomous agent running on GitHub Actions, powered by Claude Code. Writes daily
 | `TELEGRAM_BOT_TOKEN` | Optional | From @BotFather on Telegram |
 | `TELEGRAM_CHAT_ID` | Optional | Your Telegram chat ID from @userinfobot |
 | `XAI_API_KEY` | Optional | X.AI API key for searching X/Twitter |
+| `TAVILY_API_KEY` | Optional | Tavily API key for web search fallback (free tier: 1000/mo) |
+| `DISCORD_WEBHOOK_URL` | Optional | Discord channel webhook URL |
+| `SLACK_WEBHOOK_URL` | Optional | Slack incoming webhook URL |
 
-4. **Edit `aeon.yml`** — configure which skills run and when
+4. **Edit `aeon.yml`** — set `enabled: true` on the skills you want
 5. **Test** — go to **Actions > Run Skill > Run workflow** and enter a skill name (e.g. `article`)
 
 ### Getting your auth token
@@ -36,11 +41,11 @@ Autonomous agent running on GitHub Actions, powered by Claude Code. Writes daily
 
 ## How it works
 
-A GitHub Actions workflow runs every hour, checks `aeon.yml` to see if any skill is due, and if so, tells Claude Code to read and execute that skill's markdown file. After Claude finishes, the workflow commits all changes back to your repo.
+A GitHub Actions workflow runs every hour, checks `aeon.yml` to see if any skill is due and enabled, and if so, tells Claude Code to read and execute that skill's markdown file. After Claude finishes, the workflow commits all changes back to your repo.
 
 ```
 Hourly cron fires
-  → Checks aeon.yml — is any skill scheduled for this hour?
+  → Checks aeon.yml — is any skill scheduled and enabled for this hour?
     → No  → exits immediately (costs ~10 seconds)
     → Yes → installs Claude Code
       → claude -p "Read and execute skills/article.md"
@@ -48,46 +53,119 @@ Hourly cron fires
           → Workflow commits all changes back to main
 ```
 
+Monitor-type skills that find nothing log an ack (`HEARTBEAT_OK`, `TOKEN_ALERT_OK`, etc.) and the workflow skips the commit — zero noise when nothing needs attention.
+
 ## Configuration
 
-All scheduling is done in `aeon.yml`:
+All scheduling is done in `aeon.yml`. Skills default to `enabled: false` — turn on what you need:
 
 ```yaml
 skills:
   article:
-    schedule: "0 8 * * *"     # Daily at 8am UTC
+    enabled: true               # ← flip this to activate
+    schedule: "0 8 * * *"       # Daily at 8am UTC
   digest:
-    schedule: "0 14 * * *"    # Daily at 2pm UTC
-  feature:
-    schedule: "0 2 * * 1"     # Monday at 2am UTC
+    enabled: false              # ← off by default
+    schedule: "0 14 * * *"
 ```
 
 The schedule format is standard cron (`minute hour day-of-month month day-of-week`). All times are UTC.
 
-To disable a skill, remove it from `aeon.yml` or delete its schedule line.
+**Order matters** — the scheduler picks the first matching skill. Day-specific skills (e.g. Monday-only) are listed before daily skills so they get priority on their day. Heartbeat is always last as the fallback.
 
-## Adding a new skill
+## Skills
 
-1. Create `skills/your-skill.md` with instructions for Claude:
+### Research & Content
 
-```markdown
----
-name: My Skill
-description: What this skill does
----
+| Skill | Schedule | Description |
+|-------|----------|-------------|
+| `article` | Daily 8am | Research and write a 600-800 word article |
+| `digest` | Daily 2pm | Generate and send a topic digest via notifications |
+| `rss-digest` | Daily noon | Fetch and summarize RSS feed highlights |
+| `hacker-news-digest` | Daily 11am | Top HN stories filtered by your interests |
+| `paper-digest` | Sunday 8pm | Find and summarize new papers matching your research topics |
+| `substack-draft` | Friday 4pm | Compose a polished long-form article draft |
+| `tweet-digest` | Wednesday 1pm | Aggregate and summarize tweets from tracked accounts |
+| `research-brief` | On-demand | Deep dive on a topic: web search + papers + synthesis |
+| `fetch-url` | On-demand | Pull and summarize any URL |
+| `fetch-tweets` | On-demand | Fetch tweets from a specific X user |
+| `search-papers` | Reference | Academic paper search via Semantic Scholar API |
 
-Your task is to...
-```
+### Dev & Code
 
-2. Add it to `aeon.yml` with a schedule:
+| Skill | Schedule | Description |
+|-------|----------|-------------|
+| `pr-review` | Daily 3pm | Auto-review open PRs and post summary comments |
+| `github-monitor` | Daily 10am | Watch repos for stale PRs, new issues, and releases |
+| `issue-triage` | Tuesday 5am | Label and prioritize new GitHub issues |
+| `changelog` | Monday 1am | Generate a changelog from the week's commits |
+| `dependency-check` | Tuesday 3am | Flag outdated or vulnerable deps |
+| `code-health` | Friday 10pm | Report on TODOs, dead code, test coverage gaps |
+| `feature` | Monday 2am | Build features from GitHub issues labeled `ai-build` |
+| `build-tool` | Wednesday 4am | Design and create new skills |
 
-```yaml
-skills:
-  your-skill:
-    schedule: "0 12 * * *"   # Daily at noon UTC
-```
+### Crypto / On-chain
 
-That's it — no workflow changes needed.
+| Skill | Schedule | Description |
+|-------|----------|-------------|
+| `token-alert` | Daily midnight | Notify on price/volume anomalies for tracked tokens |
+| `gas-report` | Daily 9am | Gas price trends on Ethereum/Base/Monad |
+| `wallet-digest` | Daily 5pm | Summarize recent activity across tracked wallets |
+| `on-chain-monitor` | Daily 6pm | Monitor contracts and addresses for notable events |
+| `defi-monitor` | Daily 7pm | Check pool health, positions, and yield rates |
+
+### Productivity
+
+| Skill | Schedule | Description |
+|-------|----------|-------------|
+| `morning-brief` | Daily 7am | Aggregated daily briefing: priorities, headlines, schedule |
+| `weekly-review` | Sunday 10pm | Synthesize the week's logs into a structured retrospective |
+| `goal-tracker` | Sunday 5am | Compare progress against goals in MEMORY.md |
+| `idea-capture` | On-demand | Quick note capture via Telegram → memory |
+
+### Meta / Agent
+
+| Skill | Schedule | Description |
+|-------|----------|-------------|
+| `heartbeat` | Hourly (fallback) | Ambient check — surface anything needing attention |
+| `memory-flush` | Daily 11pm | Promote important log entries into MEMORY.md |
+| `reflect` | Sunday 6am | Consolidate memory, prune stale entries |
+| `skill-health` | Saturday 1am | Check which scheduled skills haven't run recently |
+| `self-review` | Saturday 3am | Audit what Aeon did, what failed, what to improve |
+
+## Tools
+
+Reusable scripts in `tools/` available to all skills:
+
+| Tool | Description | Requires |
+|------|-------------|----------|
+| `tools/notify.sh "msg"` | Send to all configured channels (Telegram, Discord, Slack) | Secrets for each channel |
+| `tools/web-search.sh "query"` | Tavily API search (fallback — skills try WebSearch first) | `TAVILY_API_KEY` |
+| `tools/fetch-url.sh "url"` | Fetch URL as clean markdown via Jina Reader (fallback) | Nothing (free) |
+
+Skills prefer Claude Code's built-in WebSearch and WebFetch. The shell tools are fallbacks for when built-in tools are unavailable or return insufficient results.
+
+## Notifications
+
+Aeon fans out notifications to every configured channel. Set the secret and it activates — no code changes needed.
+
+| Channel | Secret(s) |
+|---------|-----------|
+| Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
+| Discord | `DISCORD_WEBHOOK_URL` |
+| Slack | `SLACK_WEBHOOK_URL` |
+
+**Discord setup:** Channel settings → Integrations → Webhooks → Create Webhook → copy URL.
+
+**Slack setup:** api.slack.com → Create App → Incoming Webhooks → activate → pick channel → copy URL.
+
+## Config files
+
+| File | Purpose |
+|------|---------|
+| `memory/feeds.yml` | RSS/Atom feed URLs for `rss-digest` |
+| `memory/watched-repos.md` | GitHub repos monitored by `github-monitor`, `pr-review`, etc. |
+| `memory/on-chain-watches.yml` | Blockchain addresses/contracts for `on-chain-monitor`, `wallet-digest`, `defi-monitor` |
 
 ## Telegram integration
 
@@ -169,6 +247,30 @@ Same code, different host. Deploy the webhook handler above as a serverless func
 
 Add the label `ai-build` to any GitHub issue. The workflow fires automatically and Claude will read the issue, implement it, and open a PR.
 
+## Adding a new skill
+
+1. Create `skills/your-skill.md` with instructions for Claude:
+
+```markdown
+---
+name: My Skill
+description: What this skill does
+---
+
+Your task is to...
+```
+
+2. Add it to `aeon.yml` with a schedule and enable it:
+
+```yaml
+skills:
+  your-skill:
+    enabled: true
+    schedule: "0 12 * * *"   # Daily at noon UTC
+```
+
+That's it — no workflow changes needed. On-demand skills don't need a schedule entry — trigger them via Telegram or `workflow_dispatch`.
+
 ## Running locally
 
 ```bash
@@ -203,20 +305,53 @@ This merges template changes without overwriting your personal content, since yo
 ## Project structure
 
 ```
-CLAUDE.md           ← agent identity (auto-loaded by Claude Code)
-aeon.yml            ← skill schedules (edit this to configure)
+CLAUDE.md                ← agent identity (auto-loaded by Claude Code)
+aeon.yml                 ← skill schedules + enabled flags (edit this to configure)
+tools/
+  notify.sh              ← multi-channel notification (Telegram/Discord/Slack)
+  web-search.sh          ← Tavily API search (fallback)
+  fetch-url.sh           ← Jina Reader URL fetch (fallback)
 skills/
-  article.md        ← daily article skill
-  digest.md         ← daily digest skill
-  feature.md        ← feature builder skill
-  reflect.md        ← weekly reflection skill
-  build-tool.md     ← skill builder skill
-  fetch-tweets.md   ← tweet fetcher skill
-  search-papers.md  ← academic paper search tool
+  article.md             ← daily article
+  digest.md              ← daily digest
+  rss-digest.md          ← RSS feed digest
+  hacker-news-digest.md  ← HN top stories
+  paper-digest.md        ← academic paper digest
+  tweet-digest.md        ← X/Twitter digest
+  substack-draft.md      ← long-form article draft
+  research-brief.md      ← deep research dive (on-demand)
+  fetch-url.md           ← URL summarizer (on-demand)
+  fetch-tweets.md        ← tweet fetcher (on-demand)
+  search-papers.md       ← paper search reference
+  pr-review.md           ← PR auto-review
+  github-monitor.md      ← repo monitoring
+  issue-triage.md        ← issue labeling
+  changelog.md           ← weekly changelog
+  dependency-check.md    ← dep vulnerability check
+  code-health.md         ← code quality report
+  feature.md             ← feature builder (from issues)
+  build-tool.md          ← skill builder
+  token-alert.md         ← token price alerts
+  gas-report.md          ← gas price trends
+  wallet-digest.md       ← wallet activity summary
+  on-chain-monitor.md    ← contract event monitor
+  defi-monitor.md        ← DeFi position monitor
+  morning-brief.md       ← daily morning briefing
+  weekly-review.md       ← weekly retrospective
+  goal-tracker.md        ← goal progress tracker
+  idea-capture.md        ← quick note capture (on-demand)
+  heartbeat.md           ← ambient health check (fallback)
+  memory-flush.md        ← log → memory promotion
+  reflect.md             ← weekly memory consolidation
+  skill-health.md        ← skill run audit
+  self-review.md         ← agent self-audit
 memory/
-  MEMORY.md         ← long-term persistent memory
+  MEMORY.md              ← long-term persistent memory
+  feeds.yml              ← RSS feed URLs
+  watched-repos.md       ← GitHub repos to monitor
+  on-chain-watches.yml   ← blockchain addresses to watch
 .github/
   workflows/
-    run-skill.yml   ← scheduled skill runner
-    telegram.yml    ← Telegram message polling
+    run-skill.yml        ← scheduled skill runner
+    telegram.yml         ← Telegram message polling + webhook
 ```
