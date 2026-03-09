@@ -89,6 +89,17 @@ skills:
 
 That's it — no workflow changes needed.
 
+## Telegram integration
+
+Send messages to your Telegram bot and Aeon will interpret them — run skills, answer questions, or update memory. Polls every 5 minutes.
+
+**Setup:**
+1. Create a bot with [@BotFather](https://t.me/BotFather) on Telegram
+2. Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to your repo secrets
+3. Send your bot a message like "write an article about quantum computing"
+
+Only messages from your `TELEGRAM_CHAT_ID` are accepted — anyone else is ignored.
+
 ## Trigger feature builds from issues
 
 Add the label `ai-build` to any GitHub issue. The workflow fires automatically and Claude will read the issue, implement it, and open a PR.
@@ -141,5 +152,6 @@ memory/
   MEMORY.md         ← long-term persistent memory
 .github/
   workflows/
-    run-skill.yml   ← single workflow dispatches all skills
+    run-skill.yml   ← scheduled skill runner
+    telegram.yml    ← Telegram message polling
 ```

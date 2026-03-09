@@ -1,0 +1,108 @@
+name: Telegram
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # Every 5 minutes
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for messages
+        id: check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram not configured, skipping"
+            exit 0
+          fi
+
+          RESPONSE=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?timeout=0&allowed_updates=%5B%22message%22%5D")
+
+          # Get the latest message
+          MESSAGE=$(echo "$RESPONSE" | jq -r '.result[-1].message.text // empty')
+          UPDATE_ID=$(echo "$RESPONSE" | jq -r '.result[-1].update_id // empty')
+          CHAT_ID=$(echo "$RESPONSE" | jq -r '.result[-1].message.chat.id // empty')
+
+          if [ -z "$MESSAGE" ]; then
+            echo "No new messages"
+            exit 0
+          fi
+
+          # Only accept messages from the configured chat
+          if [ "$CHAT_ID" != "$TELEGRAM_CHAT_ID" ]; then
+            echo "Ignoring message from unauthorized chat: $CHAT_ID"
+            # Confirm receipt so it doesn't keep showing up
+            curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=$((UPDATE_ID + 1))" > /dev/null
+            exit 0
+          fi
+
+          # Confirm receipt so we don't reprocess
+          curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=$((UPDATE_ID + 1))" > /dev/null
+
+          echo "Received: $MESSAGE"
+          # Use delimiter syntax for multiline messages
+          echo "message<<ENDOFMESSAGE" >> "$GITHUB_OUTPUT"
+          echo "$MESSAGE" >> "$GITHUB_OUTPUT"
+          echo "ENDOFMESSAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repo
+        if: steps.check.outputs.message != ''
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        if: steps.check.outputs.message != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        if: steps.check.outputs.message != ''
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run
+        if: steps.check.outputs.message != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          MESSAGE="${{ steps.check.outputs.message }}"
+          claude -p "Today is $TODAY. You received this message from the user on Telegram:
+
+          \"$MESSAGE\"
+
+          Read memory/MEMORY.md for context. Look at the available skills in skills/ to understand what you can do.
+
+          Interpret what the user wants and act on it:
+          - If they want you to run a skill (e.g. \"write an article about X\", \"send me a digest\"), read that skill file and execute it.
+          - If they want information or have a question, research it and respond.
+          - If they want you to remember something, update memory/MEMORY.md.
+          - For anything else, do your best and explain what you did.
+
+          Always send your response back via Telegram so the user sees it." --dangerously-skip-permissions
+
+      - name: Commit results
+        if: steps.check.outputs.message != ''
+        run: |
+          git config user.email "aeon@github-actions"
+          git config user.name "Aeon"
+          git add -A
+          git diff --staged --quiet || git commit -m "chore(telegram): auto-commit $(date +%Y-%m-%d)"
+          git pull --rebase || true
+          git push -u origin HEAD

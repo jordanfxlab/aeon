@@ -13,3 +13,9 @@ skills:
     schedule: "0 6 * * 0"     # Sunday at 6am UTC
   build-tool:
     schedule: "0 4 * * 3"     # Wednesday at 4am UTC
+
+# Telegram integration
+# Polls for messages every 5 minutes. Set TELEGRAM_BOT_TOKEN
+# and TELEGRAM_CHAT_ID in your repo secrets to enable.
+telegram:
+  enabled: true
