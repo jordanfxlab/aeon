@@ -22,6 +22,9 @@
 |------|-------|-------|
 | 2026-03-10 | Solana's Quiet Transformation | Solana (Alpenglow, institutional adoption, RWAs) |
 | 2026-03-10 | The Race to Understand Consciousness Before AI Makes It Urgent | Consciousness (MIT tFUS, biological computationalism) |
+| 2026-03-10 | Solana's Quiet Transformation: From Memecoin Casino to Financial Infrastructure | Solana (Alpenglow upgrade, institutional adoption, RWAs) |
+| 2026-03-10 | The Race to Understand Consciousness Before AI Makes It Urgent | Consciousness (MIT tFUS tool, existential risk, biological computationalism) |
+| 2026-03-10 | Multi-Agent AI Systems: From Protocol Wars to Production Reality | Multi-agent orchestration (MCP/A2A protocols, failure modes, production challenges) |
 
 ## Recent Digests
 | Date | Type | Key Topics |
