@@ -4,17 +4,17 @@ Background intelligence that evolves with you.
 
 Autonomous agent running on GitHub Actions, powered by Claude Code. 32 skills across research, dev tooling, crypto monitoring, and productivity — all off by default, turn on what you need.
 
-<p align="center">
-  <img src="aeon-banner.jpg" alt="Aeon Banner" width="100%" />
-</p>
-
-**No infra, no servers, no monthly fee.** Aeon runs entirely on GitHub Actions — fork the repo, add your Claude token, and you have an autonomous agent. Skills are just markdown files that Claude reads and executes. The scheduler is a cron job. Memory is git commits. There's nothing to deploy.
+**No infra, no Mac Mini, no API costs.** Aeon runs entirely on GitHub Actions — fork the repo, add your Claude Code token, and you have an autonomous agent. Skills are just markdown files that Claude reads and executes. The scheduler is a cron job. Memory is git commits. Nothing else really.
 
 Talk to it on Telegram, Discord, or Slack — it polls for messages, interprets what you want, and acts on it. Ask it to write an article, run a digest, or research a topic. It responds in the same channel.
 
 It builds its own skills. The `build-skill` skill looks at open issues and capability gaps, then writes a new `SKILL.md` and wires it up. The `search-skill` skill searches the [open agent skills ecosystem](https://github.com/vercel-labs/skills) for existing skills to install. Skills compose — one skill can read and execute another, chaining outputs together.
 
 Unlike managed agent platforms, there's no vendor lock-in and no usage fees beyond what you already pay for Claude and GitHub. The entire system is ~200 lines of workflow YAML and a folder of markdown files. You own all of it.
+
+<p align="center">
+  <img src="aeon-banner.jpg" alt="Aeon Banner" width="100%" />
+</p>
 
 ## Quick start
 
