@@ -84,6 +84,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Early checkout
+        if: github.event_name == 'schedule' || github.event_name == 'issues'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check messages
         id: messages
         if: github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
@@ -392,9 +398,25 @@ jobs:
           git config user.email "aeon@github-actions"
           git config user.name "Aeon"
           rm -f ./notify  # Remove generated script before committing
+
+          CURRENT_BRANCH=$(git branch --show-current)
+          LABEL="${{ steps.work.outputs.label }}"
+
+          # If Claude created a feature branch, push it then switch back to main
+          if [ "$CURRENT_BRANCH" != "main" ] && [ -n "$CURRENT_BRANCH" ]; then
+            echo "On feature branch: $CURRENT_BRANCH"
+            git add -A
+            git diff --staged --quiet || git commit -m "chore($LABEL): auto-commit $(date +%Y-%m-%d)"
+            git push --force-with-lease -u origin "$CURRENT_BRANCH" || true
+
+            # Switch back to main and cherry-pick memory/log changes if any
+            git checkout main
+            git pull --rebase origin main || true
+          fi
+
+          # Commit any remaining changes on main
           git add -A
           git diff --staged --quiet && exit 0
-          LABEL="${{ steps.work.outputs.label }}"
           git commit -m "chore($LABEL): auto-commit $(date +%Y-%m-%d)"
           for i in 1 2 3; do
             if git pull --rebase origin main; then
