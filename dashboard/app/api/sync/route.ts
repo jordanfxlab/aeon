@@ -35,7 +35,15 @@ export async function POST() {
       return NextResponse.json({ ok: true, message: 'Nothing to commit' })
     }
 
-    run('git push')
+    try {
+      run('git push')
+    } catch (e: unknown) {
+      const pushErr = e instanceof Error ? e.message : 'Push failed'
+      // Commit succeeded but push failed — still useful feedback
+      return NextResponse.json({
+        error: `Committed locally but push failed: ${pushErr.slice(0, 200)}`,
+      }, { status: 500 })
+    }
 
     return NextResponse.json({ ok: true, message: 'Pushed to GitHub' })
   } catch (error: unknown) {
