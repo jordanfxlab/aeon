@@ -154,6 +154,7 @@ jobs:
           else
             MODEL="${CONFIG_MODEL:-claude-opus-4-6}"
           fi
+          echo "Using model: $MODEL"
           # Generate notify script in workspace (Claude calls: ./notify "message")
           cat > ./notify << 'NOTIFY_SCRIPT'
           #!/usr/bin/env bash
