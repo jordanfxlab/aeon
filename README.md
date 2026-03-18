@@ -1,10 +1,13 @@
-# Aeon <img src="aeon.jpg" alt="Aeon" width="24" />
+<p align="center">
+  <img src="aeon.jpg" alt="Aeon" width="120" />
+</p>
 
-**Background intelligence that evolves with you.**
+<h1 align="center">AEON</h1>
 
-Autonomous agent running on GitHub Actions, powered by Claude Code. 32 skills across research, dev tooling, crypto monitoring, and productivity — all off by default, enable what you need.
-
-No infra. No Mac Mini. No API costs beyond Claude. Skills are markdown files. The scheduler is a cron job. Memory is git commits.
+<p align="center">
+  <strong>Background intelligence that evolves with you.</strong><br>
+  Autonomous agent on GitHub Actions, powered by Claude Code. 32 skills across research, dev tooling, crypto monitoring, and productivity — all off by default, enable what you need.
+</p>
 
 <p align="center">
   <img src="aeon-banner.jpg" alt="Aeon Banner" width="100%" />
