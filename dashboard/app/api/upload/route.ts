@@ -1,6 +1,19 @@
 import { NextResponse } from 'next/server'
 import { createFile, getFileContent, updateFile } from '@/lib/github'
 
+function detectSecretsFromContent(content: string): string[] {
+  const matches = new Set<string>()
+  const re = /\$\{?([A-Z][A-Z0-9_]{2,})\}?/g
+  let m
+  while ((m = re.exec(content)) !== null) {
+    const name = m[1]
+    if (/_(API_KEY|KEY|TOKEN|SECRET|WEBHOOK_URL|PASSWORD|CREDENTIALS)$/.test(name)) {
+      matches.add(name)
+    }
+  }
+  return [...matches]
+}
+
 function extractSkillName(content: string): string {
   // Try frontmatter name field
   const fm = content.match(/^---\s*\n([\s\S]*?)\n---/)
@@ -140,7 +153,11 @@ export async function POST(request: Request) {
       // Config update failed — skill files were still created
     }
 
-    return NextResponse.json({ name: skillName, filesWritten })
+    // Detect secrets referenced in skill content
+    const allContent = files.map(f => f.content).join('\n')
+    const detectedSecrets = detectSecretsFromContent(allContent)
+
+    return NextResponse.json({ name: skillName, filesWritten, detectedSecrets })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })

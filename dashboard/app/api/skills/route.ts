@@ -1,5 +1,19 @@
 import { NextResponse } from 'next/server'
+import { execSync } from 'child_process'
+import { resolve } from 'path'
 import { getFileContent, getDirectory, updateFile, deleteDirectory } from '@/lib/github'
+
+function getRepoSlug(): string {
+  if (process.env.GITHUB_REPO) return process.env.GITHUB_REPO
+  try {
+    const url = execSync('git remote get-url origin', { stdio: 'pipe', cwd: resolve(process.cwd(), '..') }).toString().trim()
+    // https://github.com/owner/repo.git or git@github.com:owner/repo.git
+    const m = url.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/)
+    return m ? m[1] : ''
+  } catch {
+    return ''
+  }
+}
 
 function parseModel(yaml: string): string {
   const match = yaml.match(/^model:\s*(\S+)/m)
@@ -70,7 +84,8 @@ export async function GET() {
     }))
 
     const model = parseModel(configResult.content)
-    return NextResponse.json({ skills, model })
+    const repo = getRepoSlug()
+    return NextResponse.json({ skills, model, repo })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })

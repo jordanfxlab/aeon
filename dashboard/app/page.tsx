@@ -24,6 +24,7 @@ interface Secret {
   group: string
   description: string
   isSet: boolean
+  either?: string
 }
 
 const MODELS = [
@@ -65,37 +66,43 @@ function localToUtc24(localH: number): number {
   return ((localH - getUtcOffsetHours()) % 24 + 24) % 24
 }
 
-function parseCron(cron: string): { mode: 'interval'; hours: number } | { mode: 'time'; hour12: number; ampm: 'AM' | 'PM'; day: number } {
+function parseCron(cron: string): { mode: 'interval'; hours: number } | { mode: 'time'; hour12: number; minute: number; ampm: 'AM' | 'PM'; days: number[] } {
   const parts = cron.split(' ')
+  const m = parts[0]
   const h = parts[1]
   const dow = parts[4]
   if (h === '*' || h.includes('/')) {
     return { mode: 'interval', hours: h === '*' ? 1 : parseInt(h.split('/')[1]) || 1 }
   }
   const utcH = parseInt(h)
+  const minute = parseInt(m) || 0
   const localH = utcToLocal24(utcH)
   return {
     mode: 'time',
     hour12: localH > 12 ? localH - 12 : localH === 0 ? 12 : localH,
+    minute,
     ampm: localH >= 12 ? 'PM' : 'AM',
-    day: dow === '*' ? -1 : parseInt(dow),
+    days: dow === '*' ? [-1] : dow.split(',').map(d => parseInt(d)).filter(d => !isNaN(d)),
   }
 }
 
 function cronLabel(cron: string): string {
   const p = parseCron(cron)
   if (p.mode === 'interval') return `Every ${p.hours}h`
-  const dayName = p.day === -1 ? 'daily' : DAYS.find(d => d.value === p.day)?.label || ''
-  return `${p.hour12} ${p.ampm} ${dayName}`
+  const time = `${p.hour12}:${String(p.minute).padStart(2, '0')} ${p.ampm}`
+  if (p.days.includes(-1)) return `${time} daily`
+  const dayNames = p.days.map(d => DAYS.find(x => x.value === d)?.label || '').filter(Boolean)
+  return `${time} ${dayNames.join(',')}`
 }
 
-function buildCron(mode: 'interval' | 'time', hours: number, hour12: number, ampm: 'AM' | 'PM', day: number): string {
+function buildCron(mode: 'interval' | 'time', hours: number, hour12: number, minute: number, ampm: 'AM' | 'PM', days: number[]): string {
   if (mode === 'interval') return `0 */${hours} * * *`
   let localH = hour12
   if (ampm === 'PM' && localH !== 12) localH += 12
   if (ampm === 'AM' && localH === 12) localH = 0
   const utcH = localToUtc24(localH)
-  return `0 ${utcH} * * ${day === -1 ? '*' : day}`
+  const dowField = days.includes(-1) ? '*' : days.sort((a, b) => a - b).join(',')
+  return `${minute} ${utcH} * * ${dowField}`
 }
 
 function ScheduleEditor({ cron, onSave }: { cron: string; onSave: (cron: string) => void }) {
@@ -103,13 +110,28 @@ function ScheduleEditor({ cron, onSave }: { cron: string; onSave: (cron: string)
   const [mode, setMode] = useState<'interval' | 'time'>(parsed.mode)
   const [hours, setHours] = useState(parsed.mode === 'interval' ? parsed.hours : 3)
   const [hour12, setHour12] = useState(parsed.mode === 'time' ? parsed.hour12 : 7)
+  const [minute, setMinute] = useState(parsed.mode === 'time' ? parsed.minute : 0)
   const [ampm, setAmpm] = useState<'AM' | 'PM'>(parsed.mode === 'time' ? parsed.ampm : 'AM')
-  const [day, setDay] = useState(parsed.mode === 'time' ? parsed.day : -1)
+  const [days, setDays] = useState<number[]>(parsed.mode === 'time' ? parsed.days : [-1])
 
-  const apply = () => onSave(buildCron(mode, hours, hour12, ampm, day))
+  const toggleDay = (value: number) => {
+    setMode('time')
+    if (value === -1) {
+      setDays([-1])
+      return
+    }
+    const without = days.filter(d => d !== -1 && d !== value)
+    if (days.includes(value)) {
+      setDays(without.length === 0 ? [-1] : without)
+    } else {
+      setDays([...without, value])
+    }
+  }
+
+  const apply = () => onSave(buildCron(mode, hours, hour12, minute, ampm, days))
 
   return (
-    <div className="px-4 py-2 bg-zinc-900/80 border-b border-zinc-800/30 flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+    <div className="px-4 py-2 bg-zinc-900/80 border-b border-zinc-800/30 flex flex-wrap items-center gap-x-4 gap-y-2" onClick={(e) => e.stopPropagation()}>
       {/* Interval */}
       <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
         <input type="radio" name="sched-mode" checked={mode === 'interval'} onChange={() => setMode('interval')} className="accent-green-500 w-3 h-3" />
@@ -135,6 +157,13 @@ function ScheduleEditor({ cron, onSave }: { cron: string; onSave: (cron: string)
           onChange={(e) => { setHour12(Math.max(1, Math.min(12, parseInt(e.target.value) || 1))); setMode('time') }}
           className="w-10 bg-zinc-800 text-zinc-200 text-[10px] rounded px-1.5 py-0.5 border border-zinc-700/50 outline-none text-center font-mono"
         />
+        <span className="text-[10px] text-zinc-400">:</span>
+        <input
+          type="number" min={0} max={59} value={String(minute).padStart(2, '0')}
+          onFocus={() => setMode('time')}
+          onChange={(e) => { setMinute(Math.max(0, Math.min(59, parseInt(e.target.value) || 0))); setMode('time') }}
+          className="w-10 bg-zinc-800 text-zinc-200 text-[10px] rounded px-1.5 py-0.5 border border-zinc-700/50 outline-none text-center font-mono"
+        />
         <div className="flex text-[10px] rounded overflow-hidden border border-zinc-700/50">
           <button type="button" onClick={() => { setAmpm('AM'); setMode('time') }}
             className={`px-1.5 py-0.5 ${ampm === 'AM' ? 'bg-zinc-600 text-white' : 'bg-zinc-800 text-zinc-500'}`}>AM</button>
@@ -143,13 +172,14 @@ function ScheduleEditor({ cron, onSave }: { cron: string; onSave: (cron: string)
         </div>
       </label>
 
-      {/* Day pills */}
+      {/* Day pills — multi-select */}
       {mode === 'time' && (
         <div className="flex gap-0.5 shrink-0">
           {DAYS.map(d => (
-            <button key={d.value} type="button" onClick={() => setDay(d.value)}
+            <button key={d.value} type="button" onClick={() => toggleDay(d.value)}
               className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                day === d.value ? 'bg-green-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                (d.value === -1 ? days.includes(-1) : days.includes(d.value))
+                  ? 'bg-green-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
               }`}>{d.label}</button>
           ))}
         </div>
@@ -211,6 +241,7 @@ export default function Dashboard() {
   const [runs, setRuns] = useState<Run[]>([])
   const [secrets, setSecrets] = useState<Secret[]>([])
   const [model, setModel] = useState('claude-sonnet-4-6')
+  const [repo, setRepo] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<Record<string, boolean>>({})
@@ -220,6 +251,8 @@ export default function Dashboard() {
   const [hasChanges, setHasChanges] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [openSchedule, setOpenSchedule] = useState<string | null>(null)
+  const [addingSecret, setAddingSecret] = useState(false)
+  const [newSecretName, setNewSecretName] = useState('')
 
   // Run logs viewer
   const [selectedRun, setSelectedRun] = useState<Run | null>(null)
@@ -314,6 +347,7 @@ export default function Dashboard() {
         const data = await skillsRes.json()
         setSkills(data.skills)
         if (data.model) setModel(data.model)
+        if (data.repo) setRepo(data.repo)
       }
       if (runsRes.ok) setRuns((await runsRes.json()).runs)
       if (secretsRes.ok) {
@@ -491,10 +525,19 @@ export default function Dashboard() {
         body: JSON.stringify({ name, value: secretValue.trim() }),
       })
       if (res.ok) {
-        setSecrets(s => s.map(sec => sec.name === name ? { ...sec, isSet: true } : sec))
+        setSecrets(s => {
+          const exists = s.some(sec => sec.name === name)
+          if (exists) return s.map(sec => sec.name === name ? { ...sec, isSet: true } : sec)
+          return [...s, { name, group: 'Skill Keys', description: 'Custom secret', isSet: true }]
+        })
         setEditingSecret(null)
         setSecretValue('')
+        setAddingSecret(false)
+        setNewSecretName('')
         flash(`${name} saved`)
+      } else {
+        const data = await res.json()
+        flash(data.error || 'Failed to save')
       }
     } finally {
       setBusy(b => ({ ...b, [`sec-${name}`]: false }))
@@ -530,6 +573,21 @@ export default function Dashboard() {
       files.push({ path, content })
     }
     setUploadFiles(files)
+    // Auto-fill name from SKILL.md / .skill frontmatter
+    const skillFile = files.find(f => {
+      const lower = f.path.toLowerCase()
+      return lower === 'skill.md' || lower.endsWith('/skill.md') || lower.endsWith('.skill')
+    })
+    if (skillFile) {
+      const fm = skillFile.content.match(/^---\s*\n([\s\S]*?)\n---/)
+      if (fm) {
+        const nameMatch = fm[1].match(/name:\s*(.+)/)
+        if (nameMatch) {
+          const slug = nameMatch[1].trim().replace(/^['"]|['"]$/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+          if (slug) setUploadName(slug)
+        }
+      }
+    }
   }
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -551,11 +609,29 @@ export default function Dashboard() {
       })
       if (res.ok) {
         const data = await res.json()
-        flash(`Uploaded skill "${data.name}" (${data.filesWritten} files)`)
+        const missing = (data.detectedSecrets as string[] || []).filter(
+          (name: string) => !secrets.some(s => s.name === name && s.isSet)
+        )
+        if (missing.length > 0) {
+          flash(`Uploaded "${data.name}" — needs secrets: ${missing.join(', ')}`)
+          // Add missing secrets to the list so user can set them
+          setSecrets(s => {
+            const newSecrets = missing
+              .filter((name: string) => !s.some(sec => sec.name === name))
+              .map((name: string) => ({ name, group: 'Skill Keys', description: `Required by ${data.name}`, isSet: false }))
+            return [...s, ...newSecrets]
+          })
+        } else {
+          flash(`Uploaded skill "${data.name}" (${data.filesWritten} files)`)
+        }
         setShowImport(false)
         setUploadFiles([])
         setUploadName('')
-        fetchData()
+        // Refresh skills list but not secrets (detected secrets were just added to local state)
+        fetch('/api/skills').then(r => r.ok ? r.json() : null).then(d => {
+          if (d) { setSkills(d.skills); if (d.model) setModel(d.model); if (d.repo) setRepo(d.repo) }
+        })
+        checkSync()
       } else {
         const data = await res.json()
         flash(data.error || 'Upload failed')
@@ -608,22 +684,7 @@ export default function Dashboard() {
       <header className="border-b border-zinc-800/50 px-5 py-3 shrink-0">
         <div className="flex items-center justify-between">
           <img src="/logo.png" alt="AEON" className="h-16" />
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Model</span>
-              <select
-                value={model}
-                onChange={(e) => updateModel(e.target.value)}
-                className="bg-zinc-800 text-zinc-300 text-xs rounded-lg px-2.5 py-1.5 border border-zinc-700/50 outline-none cursor-pointer appearance-none pr-7 font-mono"
-                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
-              >
-                {MODELS.map(m => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {authStatus && !authStatus.authenticated && (
               <button
                 onClick={() => setupAuth()}
@@ -633,6 +694,27 @@ export default function Dashboard() {
                 {authLoading ? 'Setting up...' : 'Authenticate'}
               </button>
             )}
+            {repo && (
+              <a
+                href={`https://github.com/${repo}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 transition-colors flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+              </a>
+            )}
+            <select
+              value={model}
+              onChange={(e) => updateModel(e.target.value)}
+              className="bg-zinc-800 text-zinc-300 text-xs rounded-lg px-2.5 py-1.5 border border-zinc-700/50 outline-none cursor-pointer appearance-none pr-7 font-mono"
+              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
+            >
+              {MODELS.map(m => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
             <button
               onClick={() => setShowImport(true)}
               className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 transition-colors"
@@ -663,7 +745,7 @@ export default function Dashboard() {
             <span className="text-[10px] text-zinc-600">Timezone: {getLocalTzAbbr()}</span>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {skills.map(skill => (
+            {[...skills].sort((a, b) => Number(b.enabled) - Number(a.enabled)).map(skill => (
               <div key={skill.name} className={`border-b border-zinc-800/20 border-l-2 ${skill.enabled ? 'bg-green-950/10 border-l-green-500' : 'border-l-transparent'}`}>
                 <div
                   onClick={() => setOpenSchedule(openSchedule === skill.name ? null : skill.name)}
@@ -765,8 +847,25 @@ export default function Dashboard() {
                   <div className="px-4 pt-3 pb-1">
                     <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">{group}</span>
                   </div>
-                  {groupSecrets.map(secret => (
-                    <div key={secret.name} className="px-4 py-2 border-b border-zinc-800/20 hover:bg-zinc-900/50 transition-colors">
+                  {groupSecrets.map((secret, i) => {
+                    const eitherSibling = secret.either
+                      ? groupSecrets.find(s => s.either === secret.either && s.name !== secret.name)
+                      : null
+                    const siblingIsSet = eitherSibling?.isSet ?? false
+                    const dimmed = !secret.isSet && siblingIsSet
+                    // Show "or" divider between either-grouped secrets
+                    const prevSecret = i > 0 ? groupSecrets[i - 1] : null
+                    const showOr = secret.either && prevSecret?.either === secret.either
+
+                    return (<div key={secret.name}>
+                    {showOr && (
+                      <div className="flex items-center gap-2 px-4 py-0.5">
+                        <div className="flex-1 border-t border-zinc-800/40" />
+                        <span className="text-[9px] text-zinc-600 uppercase tracking-wider">or</span>
+                        <div className="flex-1 border-t border-zinc-800/40" />
+                      </div>
+                    )}
+                    <div className={`px-4 py-2 border-b border-zinc-800/20 hover:bg-zinc-900/50 transition-colors ${dimmed ? 'opacity-40' : ''}`}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -829,10 +928,58 @@ export default function Dashboard() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  </div>)
+                  })}
                 </div>
               )
             })}
+            {/* Add custom secret */}
+            <div className="px-4 py-3">
+              {addingSecret ? (
+                <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="text"
+                    value={newSecretName}
+                    onChange={(e) => setNewSecretName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                    placeholder="SECRET_NAME"
+                    autoFocus
+                    className="w-full bg-zinc-800 text-zinc-200 text-xs rounded px-2 py-1.5 border border-zinc-700/50 outline-none placeholder:text-zinc-600 font-mono"
+                  />
+                  {newSecretName && (
+                    <div className="flex gap-1.5">
+                      <input
+                        type="password"
+                        value={secretValue}
+                        onChange={(e) => setSecretValue(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && newSecretName && secretValue.trim() && saveSecret(newSecretName)}
+                        placeholder="paste value..."
+                        className="flex-1 bg-zinc-800 text-zinc-200 text-xs rounded px-2 py-1 border border-zinc-700/50 outline-none placeholder:text-zinc-600 font-mono"
+                      />
+                      <button
+                        onClick={() => saveSecret(newSecretName)}
+                        disabled={!secretValue.trim()}
+                        className="bg-green-600 hover:bg-green-500 text-white text-[10px] px-2 py-1 rounded transition-colors disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { setAddingSecret(false); setNewSecretName(''); setSecretValue('') }}
+                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors self-start"
+                  >
+                    cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setAddingSecret(true)}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  + Add Secret
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

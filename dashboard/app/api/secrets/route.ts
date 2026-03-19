@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { execSync } from 'child_process'
 
-const KNOWN_SECRETS = [
-  { name: 'CLAUDE_CODE_OAUTH_TOKEN', group: 'Core', description: 'Claude Code OAuth token (set via Authenticate button)' },
-  { name: 'ANTHROPIC_API_KEY', group: 'Core', description: 'Anthropic API key for Claude Code' },
+const BUILTIN_SECRETS = [
+  { name: 'CLAUDE_CODE_OAUTH_TOKEN', group: 'Core', description: 'Claude Code OAuth token (set via Authenticate button)', either: 'auth' },
+  { name: 'ANTHROPIC_API_KEY', group: 'Core', description: 'Anthropic API key for Claude Code', either: 'auth' },
   { name: 'TELEGRAM_BOT_TOKEN', group: 'Telegram', description: 'Bot token from @BotFather' },
   { name: 'TELEGRAM_CHAT_ID', group: 'Telegram', description: 'Your chat ID' },
   { name: 'DISCORD_BOT_TOKEN', group: 'Discord', description: 'Discord bot token' },
@@ -15,8 +15,13 @@ const KNOWN_SECRETS = [
   { name: 'XAI_API_KEY', group: 'Skill Keys', description: 'xAI/Grok API key (for tweet skills)' },
   { name: 'COINGECKO_API_KEY', group: 'Skill Keys', description: 'CoinGecko API key (for crypto skills)' },
   { name: 'ALCHEMY_API_KEY', group: 'Skill Keys', description: 'Alchemy API key (for on-chain skills)' },
-  { name: 'GH_GLOBAL', group: 'Core', description: 'GitHub PAT with cross-repo access' },
+  { name: 'GH_GLOBAL', group: 'Skill Keys', description: 'GitHub PAT with cross-repo access' },
 ]
+
+const BUILTIN_NAMES = new Set(BUILTIN_SECRETS.map(s => s.name))
+
+// Valid env var name pattern
+const VALID_SECRET_NAME = /^[A-Z][A-Z0-9_]{1,}$/
 
 function ghAvailable(): boolean {
   try {
@@ -49,10 +54,18 @@ export async function GET() {
 
   const setSecrets = new Set(listSecrets())
 
-  const secrets = KNOWN_SECRETS.map(s => ({
+  // Start with builtin secrets
+  const secrets = BUILTIN_SECRETS.map(s => ({
     ...s,
     isSet: setSecrets.has(s.name),
   }))
+
+  // Add any GitHub secrets not in builtins as custom "Skill Keys"
+  for (const name of setSecrets) {
+    if (!BUILTIN_NAMES.has(name)) {
+      secrets.push({ name, group: 'Skill Keys', description: 'Custom secret', isSet: true })
+    }
+  }
 
   return NextResponse.json({ secrets, ghReady: true })
 }
@@ -68,9 +81,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'name and value required' }, { status: 400 })
   }
 
-  // Only allow setting known secrets
-  if (!KNOWN_SECRETS.find(s => s.name === name)) {
-    return NextResponse.json({ error: 'Unknown secret name' }, { status: 400 })
+  // Allow any valid env var name (builtins + custom)
+  if (!VALID_SECRET_NAME.test(name)) {
+    return NextResponse.json({ error: 'Invalid secret name — use UPPER_SNAKE_CASE' }, { status: 400 })
   }
 
   try {
@@ -92,8 +105,8 @@ export async function DELETE(request: Request) {
 
   const { name } = await request.json()
 
-  if (!KNOWN_SECRETS.find(s => s.name === name)) {
-    return NextResponse.json({ error: 'Unknown secret name' }, { status: 400 })
+  if (!name || !VALID_SECRET_NAME.test(name)) {
+    return NextResponse.json({ error: 'Invalid secret name' }, { status: 400 })
   }
 
   try {
