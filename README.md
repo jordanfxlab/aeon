@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="aeon.jpg" alt="Aeon" width="120" />
+  <img src="assets/aeon.jpg" alt="Aeon" width="120" />
 </p>
 
 <h1 align="center">AEON</h1>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="aeon.gif" alt="Aeon Demo" />
+  <img src="assets/aeon.gif" alt="Aeon Demo" />
 </p>
 
 ---
@@ -24,7 +24,7 @@
 - **Doesn't break** — no daemon to crash, no process to restart. If GitHub Actions is up, Aeon is up. Failed skill? Next cron tick retries it.
 - **5-minute setup** — fork, add secrets, flip skills on. No Docker, no self-hosting, no config files beyond one YAML.
 
-![OpenClaw vs Aeon](./openclaw.jpg)
+![OpenClaw vs Aeon](./assets/openclaw.jpg)
 
 ---
 
@@ -45,7 +45,7 @@ Click on `http://localhost:5555` to open the dashboard in your browser. From the
 You can also schedule and trigger skills by messaging Aeon directly on Telegram — just tell it what you want.
 
 <p align="center">
-  <img src="tg.png" alt="Telegram" width="400" />
+  <img src="assets/tg.png" alt="Telegram" width="400" />
 </p>
 
 ---
@@ -68,7 +68,7 @@ claude setup-token   # opens browser → prints sk-ant-oat01-... (valid 1 year)
 
 ## Skills
 
-![Skills](./skills.jpg)
+![Skills](./assets/skills.jpg)
 
 ### Research & Content
 | Skill | Description |

@@ -1,35 +1,36 @@
 ---
 name: Paper Pick
-description: Find the one paper you should read today from Semantic Scholar and arXiv
+description: Find the one paper you should read today from arXiv and Semantic Scholar
 var: ""
 ---
-> **${var}** — Research topic to search for (e.g. "transformer architectures", "memory consolidation", "RL agents"). **Required** — set your research interests in aeon.yml (e.g. "AI,robotics,biology").
+> **${var}** — Research topic to search for (e.g. "transformer architectures", "memory consolidation", "RL agents"). If empty, searches broadly across AI and related fields.
 
 Read memory/MEMORY.md for context.
 Read the last 7 days of memory/logs/ to avoid recommending papers already covered.
 
 ## Steps
 
-1. Parse `${var}` — split on commas to get a list of research topics. If `${var}` is empty, log an error: "var must be set to research topics (e.g. 'AI,robotics,biology')" and exit.
+1. Search for recent papers. **Start with arXiv** (no rate limits), then try Semantic Scholar as a supplement:
 
-2. Search Semantic Scholar for each topic:
+   **Primary — arXiv** (always works, no rate limits):
    ```bash
-   # For each topic in ${var} (comma-separated):
-   QUERY="topic+keywords"  # URL-encode the topic
-   curl -s "https://api.semanticscholar.org/graph/v1/paper/search?query=${QUERY}&year=2025-2026&limit=10&fields=title,authors,abstract,url,publicationDate,citationCount,openAccessPdf" \
+   # If ${var} is set, use it as the query. Otherwise use broad categories.
+   # arXiv categories: cs.AI, cs.CL (NLP), cs.LG (machine learning)
+   curl -s -L "https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.CL+OR+cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=15"
+   ```
+
+   **Secondary — Semantic Scholar** (may 429, treat as optional):
+   ```bash
+   curl -s "https://api.semanticscholar.org/graph/v1/paper/search?query=artificial+intelligence+large+language+models&year=2025-2026&limit=5&fields=title,authors,abstract,url,publicationDate,citationCount,openAccessPdf" \
      -H "Accept: application/json"
    ```
-   If rate-limited (429), wait 3 seconds and retry once.
+   If rate-limited (429), **skip Semantic Scholar entirely** — arXiv results are sufficient. Do not retry or wait.
 
-3. Also check arXiv for the latest preprints using the same topics:
-   ```bash
-   # Build an arXiv search query from ${var} topics
-   curl -s "http://export.arxiv.org/api/query?search_query=all:${QUERY}&sortBy=submittedDate&sortOrder=descending&max_results=10"
-   ```
+2. If arXiv returned thin results or `${var}` is a niche topic, also try **WebSearch** for "[topic] paper 2025 2026 site:arxiv.org" to catch papers the API missed.
 
-4. From all results, pick **the single best paper** — the one most worth reading today. Criteria: novelty, relevance to the specified topics, practical implications. Skip anything already mentioned in recent logs.
+3. From all results, pick **the single best paper** — the one most worth reading today. Criteria: novelty, relevance, practical implications. Skip anything already mentioned in recent logs.
 
-5. Send via `./notify`:
+4. Send via `./notify`:
    ```
    *Paper Pick — ${today}*
 
@@ -39,6 +40,6 @@ Read the last 7 days of memory/logs/ to avoid recommending papers already covere
    ```
    If open-access PDF is available, include the PDF link. Otherwise just the paper link.
 
-6. Log to memory/logs/${today}.md.
+5. Log to memory/logs/${today}.md.
 
 If nothing interesting found, log "PAPER_PICK_OK" and end.

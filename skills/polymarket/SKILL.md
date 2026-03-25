@@ -12,21 +12,24 @@ Read the last 2 days of memory/logs/ to avoid repeating data.
 
 1. Fetch active markets from Polymarket's public API:
    ```bash
-   # Top markets by volume (24h)
+   # Top markets by volume (24h) — primary data source
    curl -s "https://gamma-api.polymarket.com/markets?closed=false&order=volume24hr&ascending=false&limit=20"
-
-   # Top markets by liquidity
-   curl -s "https://gamma-api.polymarket.com/markets?closed=false&order=liquidity&ascending=false&limit=20"
 
    # Recently created markets (new & trending)
    curl -s "https://gamma-api.polymarket.com/markets?closed=false&order=startDate&ascending=false&limit=20"
+   ```
+   **Note:** Do NOT use `order=liquidity` — this endpoint returns unreliable data (sub-$10k garbage values). Instead, extract liquidity from the volume response (markets with high volume inherently have liquidity) or use the CLOB API:
+   ```bash
+   # If you need liquidity data, use the CLOB API for specific markets
+   # (get the condition_id from the volume response first)
+   curl -s "https://clob.polymarket.com/book?token_id=CONDITION_ID"
    ```
 
 2. Analyze and surface. If `${var}` is set, filter markets to those related to that topic:
    - **Top 10 markets by 24h volume** — question, current odds (yes/no %), 24h volume
    - **Biggest price movers** — markets where yes/no price shifted most in 24h (compare with recent logs if available)
    - **New & notable** — recently created markets that are gaining traction (decent volume for a new market)
-   - **High liquidity markets** — where the smart money is sitting
+   - **Validate data:** discard any market with volume < $1,000 or nonsensical odds (e.g. both YES and NO at 0%). These are API artifacts.
 
 3. For any especially interesting market, use WebSearch or WebFetch to grab context on why it's moving.
 

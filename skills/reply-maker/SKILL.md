@@ -44,7 +44,11 @@ If no soul files exist, write replies that are:
    **If `${var}` contains a topic** (or is empty):
    Use recent tweet-roundup and list-digest outputs from memory/logs/ as the tweet pool. If those don't exist, search X for tweets on the topic (or on topics from memory/MEMORY.md).
 
-   If `XAI_API_KEY` is not set, fall back to WebSearch for recent tweets on the topic.
+   If `XAI_API_KEY` is not set OR the API call fails, fall back to:
+   1. Recent list-digest and tweet-roundup outputs in memory/logs/ — these already have tweet links and @handles
+   2. WebSearch for recent reply-worthy tweets on topics from memory
+
+   The memory logs are the most reliable source since they're already fetched — prefer them over retrying a blocked API.
 
 2. Select the **5 most reply-worthy tweets**. Prioritize:
    - Tweets with a take you can build on, challenge, or add signal to
@@ -73,14 +77,14 @@ If no soul files exist, write replies that are:
 
 4. Send via `./notify`:
    ```
-   Reply Maker — ${today}
+   *Reply Maker — ${today}*
 
-   1. @handle — [first ~60 chars of their tweet]...
+   *1. @handle* — [first ~60 chars of their tweet]...
    link: [tweet URL]
    A: [reply option a]
    B: [reply option b]
 
-   2. @handle — [first ~60 chars]...
+   *2. @handle* — [first ~60 chars]...
    link: [tweet URL]
    A: [reply option a]
    B: [reply option b]
@@ -98,4 +102,4 @@ If no soul files exist, write replies that are:
    ```
 
 ## Environment Variables Required
-- `XAI_API_KEY` — X.AI API key for Grok x_search (optional — falls back to WebSearch)
+- `XAI_API_KEY` — X.AI API key for Grok x_search (optional — falls back to WebSearch and memory logs)

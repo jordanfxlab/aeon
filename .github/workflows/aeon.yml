@@ -22,6 +22,7 @@ on:
           - fetch-tweets
           - github-issues
           - github-monitor
+          - github-trending
           - goal-tracker
           - hacker-news-digest
           - heartbeat
@@ -30,6 +31,7 @@ on:
           - issue-triage
           - list-digest
           - memory-flush
+          - monitor-runners
           - morning-brief
           - on-chain-monitor
           - paper-digest
@@ -51,6 +53,7 @@ on:
           - startup-idea
           - token-alert
           - token-movers
+          - token-pick
           - trending-coins
           - tweet-digest
           - wallet-digest
@@ -87,6 +90,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: read
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -163,9 +167,11 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
           ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+          JSONRENDER_ENABLED: ${{ vars.JSONRENDER_ENABLED || 'true' }}
         run: |
           TODAY=$(date -u +%Y-%m-%d)
           SKILL_NAME="${{ steps.skill.outputs.name }}"
+          export SKILL_NAME
           CONFIG_MODEL=$(grep -E '^model:' aeon.yml | sed 's/^model: *//' | tr -d ' ')
           # Check for per-skill model override in aeon.yml
           SKILL_MODEL=$(awk "/^  ${SKILL_NAME}:/{found=1} found && /model:/{print; exit}" aeon.yml | sed 's/.*model: *"\?\([^"]*\)"\?/\1/' | tr -d ' ')
@@ -198,12 +204,17 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$(jq -n --arg text "$MSG" '{text: $text}')" > /dev/null || true
           fi
+          # json-render channel — save raw message for post-run conversion
+          if [ "${JSONRENDER_ENABLED:-false}" = "true" ] && [ -n "${SKILL_NAME:-}" ]; then
+            mkdir -p dashboard/outputs
+            echo "$MSG" > "dashboard/outputs/.pending-${SKILL_NAME}.md"
+          fi
           NOTIFY_SCRIPT
           chmod +x ./notify
 
           ALLOWED="Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
           ALLOWED="$ALLOWED,Bash(curl:*),Bash(gh:*),Bash(git:*),Bash(jq:*)"
-          ALLOWED="$ALLOWED,Bash(./notify:*)"
+          ALLOWED="$ALLOWED,Bash(./notify:*),Bash(./notify-jsonrender:*)"
           ALLOWED="$ALLOWED,Bash(mkdir:*),Bash(ls:*),Bash(cat:*),Bash(chmod:*)"
           ALLOWED="$ALLOWED,Bash(date:*),Bash(echo:*),Bash(node:*),Bash(npm:*),Bash(npx:*)"
           ALLOWED="$ALLOWED,Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sort:*),Bash(grep:*)"
@@ -257,6 +268,19 @@ jobs:
           echo "| Cache creation | $CACHE_CREATION |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Total** | **$TOTAL** |" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Convert feed outputs
+        if: steps.work.outputs.mode != '' && vars.JSONRENDER_ENABLED != 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          for pending in dashboard/outputs/.pending-*.md; do
+            [ -f "$pending" ] || continue
+            SKILL=$(basename "$pending" .md | sed 's/^\.pending-//')
+            echo "json-render: converting $SKILL..."
+            ./notify-jsonrender "$SKILL" "$(cat "$pending")" && rm -f "$pending" || echo "json-render: $SKILL conversion failed (non-fatal)"
+          done
+
       - name: Commit results
         if: steps.work.outputs.mode != ''
         run: |
@@ -283,7 +307,7 @@ jobs:
           git add -A
           git diff --staged --quiet && exit 0
           git commit -m "chore($LABEL): auto-commit $(date +%Y-%m-%d)"
-          for i in $(seq 1 10); do
+          for i in 1 2 3; do
             # Pull and rebase onto latest remote
             if ! git pull --rebase origin main 2>/dev/null; then
               echo "Rebase conflict on attempt $i, auto-resolving..."
@@ -291,7 +315,7 @@ jobs:
                 CONFLICTED=$(git diff --name-only --diff-filter=U) || true
                 [ -z "$CONFLICTED" ] && break
                 for f in $CONFLICTED; do
-                  if [[ "$f" == memory/logs/* ]] || [[ "$f" == memory/topics/* ]] || [[ "$f" == memory/MEMORY.md ]]; then
+                  if [[ "$f" == memory/logs/* ]] || [[ "$f" == memory/topics/* ]] || [[ "$f" == memory/MEMORY.md ]] || [[ "$f" == dashboard/outputs/* ]]; then
                     sed -i '/^<<<<<<< /d; /^=======/d; /^>>>>>>> /d' "$f"
                     git add "$f"
                   else
@@ -314,5 +338,5 @@ jobs:
             echo "Push attempt $i failed (ref moved), retrying in ${i}s..."
             sleep "$i"
           done
-          echo "Failed to push after 10 attempts"
+          echo "Failed to push after 3 attempts"
           exit 1

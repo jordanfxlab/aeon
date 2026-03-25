@@ -23,16 +23,22 @@ If soul files exist (`soul/SOUL.md`), read them for identity and focus areas.
    - Connect to something already being worked on or tracked
    - Be the kind of thing that compounds over time
 
-3. Mix the categories:
-   - **Build** — something to ship, write, or create
-   - **Connect** — a specific person to reach out to, a community to engage with, a conversation to start
-   - **Learn** — a paper to read, a protocol to study, a concept to explore that's relevant to current work
-   - **Health/Energy** — something physical or mental that makes the rest work better
-   - **Wild card** — something unexpected, creative, or lateral that could open a new door
+3. Pick 5 actions from the pool below. Do NOT use all categories every time — pick whichever 5 are most relevant to what's actually happening this week. Some days might be 3 Build actions and 2 Learn. Some days might have zero Health actions. Let the context drive it, not a checklist.
+
+   Possible categories (use any mix):
+   - **Build** — ship, write, create, deploy, fix, prototype
+   - **Connect** — reach out, reply, collaborate, attend, post publicly
+   - **Learn** — read, study, explore, reverse-engineer, experiment
+   - **Health/Energy** — physical, mental, sleep, nutrition, environment
+   - **Money** — revenue, fundraising, deals, financial moves
+   - **Position** — content, reputation, visibility, thought leadership
+   - **Explore** — something lateral, unexpected, or outside the usual lanes
+
+   IMPORTANT: Avoid repeating generic actions across runs. Check the last 7 days of logs — if "go for a walk" or "DM 3 people" appeared recently, do NOT suggest them again. Every action should feel specific to TODAY's context, not a template.
 
 4. For each action, include:
-   - The action itself (one sentence, imperative)
-   - Why now (one sentence — what makes this relevant today, based on recent context)
+   - The action itself (one sentence, imperative, specific enough that you'd know when it's done)
+   - Why now (one sentence — what makes this relevant today, not generically good advice)
    - Expected outcome (one sentence — what's different after you do this)
 
 5. Send via `./notify`:
@@ -40,15 +46,16 @@ If soul files exist (`soul/SOUL.md`), read them for identity and focus areas.
    *5 Actions — ${today}*
 
    1. [action]
-      why: [context]
-      outcome: [result]
+   why: [context]
+   outcome: [result]
 
    2. [action]
-      why: [context]
-      outcome: [result]
+   why: [context]
+   outcome: [result]
 
    ... (5 total)
    ```
+   IMPORTANT: Do NOT indent the why/outcome lines — no leading spaces. Every line starts at column 0 (except the number prefix).
 
 6. Log to memory/logs/${today}.md:
    ```

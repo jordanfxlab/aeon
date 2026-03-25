@@ -238,6 +238,202 @@ function VarEditor({ value: initial, onSave }: { value: string; onSave: (v: stri
   )
 }
 
+// --- json-render feed types and components ---
+
+interface SkillOutput {
+  filename: string
+  skill: string
+  timestamp: string
+  spec: {
+    root: string
+    state?: Record<string, unknown>
+    elements: Record<string, SpecElement>
+  }
+}
+
+interface SpecElement {
+  type: string
+  props?: Record<string, unknown>
+  children?: string[]
+}
+
+function SpecNode({ id, elements }: { id: string; elements: Record<string, SpecElement> }) {
+  const el = elements[id]
+  if (!el) return null
+  const p = (el.props || {}) as Record<string, string | number | boolean | string[][] | string[] | undefined>
+  const kids = el.children?.map(cid => <SpecNode key={cid} id={cid} elements={elements} />)
+
+  switch (el.type) {
+    case 'Card':
+      return (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+          {(p.title || p.description) && (
+            <div className="px-4 pt-4 pb-2">
+              {p.title && <h3 className="text-sm font-medium text-zinc-200">{String(p.title)}</h3>}
+              {p.description && <p className="text-xs text-zinc-500 mt-0.5">{String(p.description)}</p>}
+            </div>
+          )}
+          <div className="px-4 pb-4 space-y-3">{kids}</div>
+        </div>
+      )
+    case 'Stack': {
+      const dir = p.direction === 'horizontal' ? 'flex-row' : 'flex-col'
+      const gap = p.gap === 'lg' ? 'gap-4' : p.gap === 'sm' ? 'gap-1' : 'gap-2'
+      return <div className={`flex ${dir} ${gap}`}>{kids}</div>
+    }
+    case 'Grid': {
+      const cols = typeof p.columns === 'number' ? p.columns : 2
+      const gap = p.gap === 'lg' ? 'gap-4' : p.gap === 'sm' ? 'gap-1' : 'gap-2'
+      return <div className={`grid ${gap}`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>{kids}</div>
+    }
+    case 'Heading': {
+      const level = p.level || 'h3'
+      const cls = level === 'h1' ? 'text-lg font-semibold' : level === 'h2' ? 'text-sm font-semibold' : level === 'h4' ? 'text-xs font-medium text-zinc-400' : 'text-xs font-medium text-zinc-300'
+      return <div className={cls}>{String(p.text || '')}</div>
+    }
+    case 'Text': {
+      const variant = p.variant || 'body'
+      const cls = variant === 'caption' ? 'text-[10px] text-zinc-500' : variant === 'muted' ? 'text-xs text-zinc-500' : variant === 'lead' ? 'text-sm text-zinc-300' : 'text-xs text-zinc-400'
+      return <p className={cls}>{String(p.text || '')}</p>
+    }
+    case 'Badge': {
+      const v = p.variant || 'default'
+      const cls = v === 'destructive' ? 'bg-red-900/30 text-red-400 border-red-800/30' : v === 'secondary' ? 'bg-zinc-800 text-zinc-400 border-zinc-700/50' : v === 'outline' ? 'bg-transparent text-zinc-400 border-zinc-700' : 'bg-green-900/30 text-green-400 border-green-800/30'
+      return <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${cls}`}>{String(p.text || '')}</span>
+    }
+    case 'Table': {
+      const columns = (p.columns || []) as string[]
+      const rows = (p.rows || []) as string[][]
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead><tr>{columns.map((c, i) => <th key={i} className="text-left text-zinc-500 font-medium px-2 py-1 border-b border-zinc-800/50">{c}</th>)}</tr></thead>
+            <tbody>{rows.map((row, ri) => <tr key={ri}>{row.map((cell, ci) => <td key={ci} className="px-2 py-1 text-zinc-400 border-b border-zinc-800/20">{cell}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      )
+    }
+    case 'Stat': {
+      const trend = p.trend as string | undefined
+      const deltaColor = trend === 'up' ? 'text-green-400' : trend === 'down' ? 'text-red-400' : 'text-zinc-500'
+      return (
+        <div className="bg-zinc-800/40 rounded-lg px-3 py-2">
+          {p.label && <div className="text-[10px] text-zinc-500 mb-0.5">{String(p.label)}</div>}
+          <div className="text-sm font-semibold text-zinc-200 font-mono">{String(p.value || '')}</div>
+          {p.delta && <div className={`text-[10px] ${deltaColor} font-mono`}>{String(p.delta)}</div>}
+        </div>
+      )
+    }
+    case 'Progress': {
+      const value = Number(p.value || 0)
+      const max = Number(p.max || 100)
+      const pct = Math.min(100, (value / max) * 100)
+      return (
+        <div>
+          {p.label && <div className="text-[10px] text-zinc-500 mb-1">{String(p.label)}</div>}
+          <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )
+    }
+    case 'TweetCard':
+      return (
+        <div className="bg-zinc-800/30 rounded-lg px-3 py-2 border border-zinc-800/50">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-xs font-medium text-zinc-300">{String(p.author || '')}</span>
+            {p.handle && <span className="text-[10px] text-zinc-600">{String(p.handle)}</span>}
+          </div>
+          <p className="text-xs text-zinc-400 leading-relaxed">{String(p.text || '')}</p>
+          {(p.likes || p.retweets) && (
+            <div className="flex gap-3 mt-1.5 text-[10px] text-zinc-600">
+              {p.likes && <span>{String(p.likes)} likes</span>}
+              {p.retweets && <span>{String(p.retweets)} RTs</span>}
+            </div>
+          )}
+        </div>
+      )
+    case 'StoryLink':
+      return (
+        <a href={String(p.href || '#')} target="_blank" rel="noopener noreferrer" className="block bg-zinc-800/30 rounded-lg px-3 py-2 border border-zinc-800/50 hover:border-zinc-700 transition-colors">
+          <div className="text-xs text-zinc-300 hover:text-zinc-100">{String(p.title || '')}</div>
+          <div className="flex gap-2 mt-0.5 text-[10px] text-zinc-600">
+            {p.source && <span>{String(p.source)}</span>}
+            {p.score && <span>{String(p.score)}</span>}
+          </div>
+        </a>
+      )
+    case 'Link':
+      return <a href={String(p.href || '#')} target="_blank" rel="noopener noreferrer" className="text-xs text-green-400 hover:text-green-300 underline underline-offset-2">{String(p.label || p.href || '')}</a>
+    case 'Alert': {
+      const t = p.type || 'info'
+      const cls = t === 'error' ? 'border-red-800/30 bg-red-900/10 text-red-400' : t === 'warning' ? 'border-yellow-800/30 bg-yellow-900/10 text-yellow-400' : t === 'success' ? 'border-green-800/30 bg-green-900/10 text-green-400' : 'border-blue-800/30 bg-blue-900/10 text-blue-400'
+      return (
+        <div className={`rounded-lg px-3 py-2 border ${cls}`}>
+          {p.title && <div className="text-xs font-medium mb-0.5">{String(p.title)}</div>}
+          {p.message && <div className="text-[11px] opacity-80">{String(p.message)}</div>}
+        </div>
+      )
+    }
+    case 'Button': {
+      const v = p.variant || 'primary'
+      const cls = v === 'danger' ? 'bg-red-600 hover:bg-red-500 text-white' : v === 'secondary' ? 'bg-zinc-700 hover:bg-zinc-600 text-zinc-200' : 'bg-green-600 hover:bg-green-500 text-white'
+      return <button className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${cls}`}>{String(p.label || '')}</button>
+    }
+    case 'Separator':
+      return <div className={`${p.orientation === 'vertical' ? 'w-px h-full bg-zinc-800' : 'h-px w-full bg-zinc-800'}`} />
+    default:
+      return <div className="text-[10px] text-zinc-600">[Unknown: {el.type}]</div>
+  }
+}
+
+function SpecRenderer({ spec }: { spec: SkillOutput['spec'] }) {
+  if (!spec?.root || !spec?.elements) return <div className="text-[10px] text-zinc-600">Invalid spec</div>
+  return <SpecNode id={spec.root} elements={spec.elements} />
+}
+
+function SkillFeed({ refreshKey }: { refreshKey: number }) {
+  const [outputs, setOutputs] = useState<SkillOutput[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch('/api/outputs')
+      .then(r => r.ok ? r.json() : { outputs: [] })
+      .then(d => setOutputs(d.outputs || []))
+      .finally(() => setLoading(false))
+  }, [refreshKey])
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12">
+      <div className="relative flex items-center justify-center">
+        <div className="absolute h-8 w-8 rounded-full border border-green-500/20" style={{ animation: 'pulse-ring 2s ease-out infinite' }} />
+        <div className="h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+      </div>
+    </div>
+  )
+
+  if (outputs.length === 0) return (
+    <div className="px-4 py-12 text-center text-zinc-600 text-xs">
+      No feed outputs yet. Enable JSONRENDER_ENABLED to generate feed cards from skill runs.
+    </div>
+  )
+
+  return (
+    <div className="space-y-3 p-3">
+      {outputs.map(o => (
+        <div key={o.filename}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[10px] font-mono text-green-400">{o.skill}</span>
+            <span className="text-[10px] text-zinc-600">{o.timestamp.replace(/T/, ' ').replace(/-(?=\d{2}Z)/g, ':').replace('Z', ' UTC')}</span>
+          </div>
+          <SpecRenderer spec={o.spec} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function timeAgo(date: string): string {
   const s = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
   if (s < 60) return 'just now'
@@ -273,6 +469,13 @@ export default function Dashboard() {
   const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Import modal
+  const [col1Tab, setCol1Tab] = useState<'skills' | 'secrets'>('skills')
+  const [col3Tab, setCol3Tab] = useState<'runs' | 'feed'>('feed')
+  const [jsonrenderEnabled, setJsonrenderEnabled] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [feedKey, setFeedKey] = useState(0)
+  const [behind, setBehind] = useState(0)
+
   const [showImport, setShowImport] = useState(false)
   const [importLoading, setImportLoading] = useState(false)
   const [uploadFiles, setUploadFiles] = useState<Array<{ path: string; content: string }>>([])
@@ -328,7 +531,11 @@ export default function Dashboard() {
   const checkSync = async () => {
     try {
       const res = await fetch('/api/sync')
-      if (res.ok) setHasChanges((await res.json()).hasChanges)
+      if (res.ok) {
+        const data = await res.json()
+        setHasChanges(data.hasChanges)
+        if (typeof data.behind === 'number') setBehind(data.behind)
+      }
     } catch { /* ignore */ }
   }
 
@@ -348,6 +555,37 @@ export default function Dashboard() {
     }
   }
 
+  const pullFromGithub = async () => {
+    setPulling(true)
+    try {
+      const res = await fetch('/api/outputs', { method: 'POST' })
+      if (res.ok) {
+        flash('Pulled latest from GitHub')
+        setFeedKey(k => k + 1)
+        fetchData()
+      } else {
+        flash('Pull failed — check terminal')
+      }
+    } finally {
+      setPulling(false)
+    }
+  }
+
+  const toggleJsonRender = async (enabled: boolean) => {
+    setJsonrenderEnabled(enabled)
+    try {
+      const res = await fetch('/api/skills', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrenderEnabled: enabled }),
+      })
+      if (res.ok) {
+        flash(`Feed ${enabled ? 'enabled' : 'disabled'}`)
+        checkSync()
+      }
+    } catch { /* ignore */ }
+  }
+
   const fetchData = useCallback(async () => {
     try {
       const [skillsRes, runsRes, secretsRes] = await Promise.all([
@@ -360,6 +598,7 @@ export default function Dashboard() {
         setSkills(data.skills)
         if (data.model) setModel(data.model)
         if (data.repo) setRepo(data.repo)
+        if (typeof data.jsonrenderEnabled === 'boolean') setJsonrenderEnabled(data.jsonrenderEnabled)
       }
       if (runsRes.ok) setRuns((await runsRes.json()).runs)
       if (secretsRes.ok) {
@@ -735,8 +974,8 @@ export default function Dashboard() {
             <select
               value={model}
               onChange={(e) => updateModel(e.target.value)}
-              className="bg-zinc-800 text-zinc-300 text-xs rounded-lg px-2.5 py-1.5 border border-zinc-700/50 outline-none cursor-pointer appearance-none pr-7 font-mono"
-              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
+              className="bg-zinc-800 text-zinc-300 text-xs rounded-lg pl-2.5 pr-7 py-1.5 border border-zinc-700/50 outline-none cursor-pointer appearance-none font-mono"
+              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', width: `${(MODELS.find(m => m.id === model)?.label.length || 10) + 5.5}ch` }}
             >
               {MODELS.map(m => (
                 <option key={m.id} value={m.id}>{m.label}</option>
@@ -746,96 +985,115 @@ export default function Dashboard() {
               onClick={() => setShowImport(true)}
               className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 transition-colors"
             >
-              + Add Skill
+              + Add
+            </button>
+            <button
+              onClick={pullFromGithub}
+              disabled={pulling}
+              className="relative bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 transition-colors disabled:opacity-50"
+            >
+              {behind > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]" />}
+              {pulling ? 'Pulling...' : '\u2190 Pull'}
             </button>
             <button
               onClick={syncToGithub}
-              disabled={syncing || !hasChanges}
-              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 transition-colors disabled:opacity-50"
+              disabled={syncing || !hasChanges || behind > 0}
+              title={behind > 0 ? 'Pull first \u2014 remote has new commits' : undefined}
+              className="relative bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 transition-colors disabled:opacity-50"
             >
-              {syncing ? 'Pushing...' : 'Push to GitHub'}
+              {hasChanges && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]" />}
+              {syncing ? 'Pushing...' : 'Push \u2192'}
             </button>
           </div>
         </div>
       </header>
 
-      {/* 3-column layout */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px_300px] min-h-0">
+      {/* 2-column layout */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[280px_1fr] min-h-0">
 
-        {/* Column 1: Skills */}
+        {/* Column 1: Skills / Secrets (tabbed) */}
         <div className="border-r border-zinc-800/50 flex flex-col min-h-0">
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/30">
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Skills</h2>
-              <span className="text-xs text-zinc-600">{enabledCount} / {skills.length} enabled</span>
+            <div className="flex items-center gap-1">
+              {(['skills', 'secrets'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setCol1Tab(tab)}
+                  className={`text-xs font-medium uppercase tracking-wider px-2 py-0.5 rounded transition-colors ${
+                    col1Tab === tab ? 'text-zinc-200 bg-zinc-800' : 'text-zinc-600 hover:text-zinc-400'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
-            <span className="text-[10px] text-zinc-600">Timezone: {getLocalTzAbbr()}</span>
+            <span className="text-[10px] text-zinc-600">
+              {col1Tab === 'skills' ? `${enabledCount}/${skills.length}` : `${secretsSet}/${secrets.length}`}
+            </span>
           </div>
+
+          {col1Tab === 'skills' ? (
           <div className="flex-1 overflow-y-auto">
             {[...skills].sort((a, b) => Number(b.enabled) - Number(a.enabled)).map(skill => (
               <div key={skill.name} className={`border-b border-zinc-800/20 border-l-2 ${skill.enabled ? 'bg-green-950/10 border-l-green-500' : 'border-l-transparent'}`}>
                 <div
                   onClick={() => setOpenSchedule(openSchedule === skill.name ? null : skill.name)}
-                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-900/50 transition-colors cursor-pointer"
+                  className="px-3 py-2 hover:bg-zinc-900/50 transition-colors cursor-pointer"
                 >
-                  {/* Toggle */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleSkill(skill.name, !skill.enabled) }}
-                    disabled={!!busy[skill.name]}
-                    className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
-                      skill.enabled ? 'bg-green-600' : 'bg-zinc-700'
-                    }`}
-                  >
-                    <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
-                      skill.enabled ? 'translate-x-[14px]' : 'translate-x-[2px]'
-                    }`} />
-                  </button>
-
-                  {/* Name + description */}
-                  <div className="flex-1 min-w-0">
-                    <div className={`font-mono text-xs font-medium truncate ${skill.enabled ? 'text-green-300' : ''}`}>{skill.name}</div>
+                  {/* Line 1: Toggle + Name + Description */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSkill(skill.name, !skill.enabled) }}
+                      disabled={!!busy[skill.name]}
+                      className={`relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full transition-colors ${
+                        skill.enabled ? 'bg-green-600' : 'bg-zinc-700'
+                      }`}
+                    >
+                      <span className={`inline-block h-2.5 w-2.5 rounded-full bg-white transition-transform ${
+                        skill.enabled ? 'translate-x-[11px]' : 'translate-x-[2px]'
+                      }`} />
+                    </button>
+                    <span className={`font-mono text-[11px] font-medium shrink-0 ${skill.enabled ? 'text-green-300' : ''}`}>{skill.name}</span>
                     {skill.description && (
-                      <div className="text-[10px] text-zinc-500 truncate max-w-[280px]">{skill.description}</div>
+                      <span className="text-[9px] text-zinc-600 truncate">{skill.description}</span>
                     )}
                   </div>
-
-                  {/* Schedule label */}
-                  <span className={`text-[10px] px-2 py-1 rounded shrink-0 font-mono ${
-                    openSchedule === skill.name
-                      ? 'bg-zinc-700 text-zinc-200'
-                      : skill.enabled
-                        ? 'bg-green-900/30 text-green-400 border border-green-800/30'
-                        : 'bg-zinc-800/60 text-zinc-500 border border-zinc-800/50'
-                  }`}>
-                    {cronLabel(skill.schedule)}
-                  </span>
-
-                  {/* Model badge */}
-                  {skill.model && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-400 border border-purple-800/30 truncate font-mono" title={`Model: ${skill.model}`}>
-                      {MODELS.find(m => m.id === skill.model)?.label || skill.model}
+                  {/* Line 2: Schedule + Model badge + Run */}
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                      openSchedule === skill.name
+                        ? 'bg-zinc-700 text-zinc-200'
+                        : skill.enabled
+                          ? 'bg-green-900/30 text-green-400 border border-green-800/30'
+                          : 'bg-zinc-800/60 text-zinc-500 border border-zinc-800/50'
+                    }`}>
+                      {cronLabel(skill.schedule)}
                     </span>
-                  )}
-
-                  {/* Vars badge */}
+                    {skill.model && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-400 border border-purple-800/30 truncate font-mono" title={`Model: ${skill.model}`}>
+                        {MODELS.find(m => m.id === skill.model)?.label || skill.model}
+                      </span>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); runSkill(skill.name, skill.var, skill.model) }}
+                      disabled={!!busy[`r-${skill.name}`] || (authStatus !== null && !authStatus.authenticated)}
+                      title={authStatus !== null && !authStatus.authenticated ? 'Authenticate first' : undefined}
+                      className="text-zinc-500 hover:text-zinc-300 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-800/50 transition-colors disabled:opacity-50 shrink-0 ml-auto"
+                    >
+                      {busy[`r-${skill.name}`] ? '\u00b7\u00b7\u00b7' : '\u25b6 Run'}
+                    </button>
+                  </div>
+                  {/* Line 3: Var (only if set) */}
                   {skill.var && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500 border border-zinc-800/50 truncate max-w-[120px] font-mono" title={skill.var}>
-                      {skill.var}
-                    </span>
+                    <div className="flex mt-1">
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500 border border-zinc-800/50 truncate max-w-[180px] font-mono" title={skill.var}>
+                        {skill.var}
+                      </span>
+                    </div>
                   )}
-
-                  {/* Run */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); runSkill(skill.name, skill.var, skill.model) }}
-                    disabled={!!busy[`r-${skill.name}`] || (authStatus !== null && !authStatus.authenticated)}
-                    title={authStatus !== null && !authStatus.authenticated ? 'Authenticate first' : undefined}
-                    className="text-zinc-500 hover:text-zinc-300 text-[10px] px-2 py-1 rounded bg-zinc-800/40 hover:bg-zinc-800 border border-zinc-800/50 transition-colors disabled:opacity-50 shrink-0"
-                  >
-                    {busy[`r-${skill.name}`] ? '\u00b7\u00b7\u00b7' : '\u25b6 Run'}
-                  </button>
                 </div>
 
-                {/* Inline schedule + var editor */}
+                {/* Inline schedule + var + model editor */}
                 {openSchedule === skill.name && (
                   <>
                     <ScheduleEditor
@@ -878,16 +1136,35 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Column 2: Secrets */}
-        <div className="border-r border-zinc-800/50 flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/30">
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Secrets</h2>
-            <span className="text-xs text-zinc-600">{secretsSet} / {secrets.length} set</span>
-          </div>
+          ) : (
           <div className="flex-1 overflow-y-auto">
-            {['Core', 'Telegram', 'Discord', 'Slack', 'Skill Keys'].map(group => {
+            {['Core', 'Telegram', '_feed', 'Discord', 'Slack', 'Skill Keys'].map(group => {
+              if (group === '_feed') {
+                return (
+                  <div key={group}>
+                    <div className="px-4 pt-3 pb-1">
+                      <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Feed</span>
+                    </div>
+                    <div className="px-4 py-2 border-b border-zinc-800/20">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs">JSONRENDER_ENABLED</span>
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${jsonrenderEnabled ? 'bg-green-500' : 'bg-zinc-600'}`} />
+                          </div>
+                          <div className="text-[10px] text-zinc-600">Write json-render specs from skill runs</div>
+                        </div>
+                        <button
+                          onClick={() => toggleJsonRender(!jsonrenderEnabled)}
+                          className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${jsonrenderEnabled ? 'bg-green-600' : 'bg-zinc-700'}`}
+                        >
+                          <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${jsonrenderEnabled ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
               const groupSecrets = secrets.filter(s => s.group === group)
               if (groupSecrets.length === 0) return null
               return (
@@ -1029,17 +1306,34 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+          )}
         </div>
 
-        {/* Column 3: Runs */}
+        {/* Column 2: Feed / Runs */}
         <div className="flex flex-col min-h-0">
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/30">
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Runs</h2>
-            <button onClick={fetchData} className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            <div className="flex gap-1">
+              {(['feed', 'runs'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setCol3Tab(tab)}
+                  className={`text-xs font-medium uppercase tracking-wider px-2 py-0.5 rounded transition-colors ${
+                    col3Tab === tab ? 'text-zinc-200 bg-zinc-800' : 'text-zinc-600 hover:text-zinc-400'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => { fetchData(); setFeedKey(k => k + 1) }} className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
               refresh
             </button>
           </div>
-          {selectedRun ? (
+          {col3Tab === 'feed' ? (
+            <div className="flex-1 overflow-y-auto">
+              <SkillFeed refreshKey={feedKey} />
+            </div>
+          ) : selectedRun ? (
             /* Log viewer */
             <div className="flex-1 flex flex-col min-h-0">
               <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/30 shrink-0">

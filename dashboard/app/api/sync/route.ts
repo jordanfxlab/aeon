@@ -13,7 +13,13 @@ export async function GET() {
     const status = run('git status --porcelain')
     const hasChanges = status.length > 0
     const changedFiles = hasChanges ? status.split('\n').length : 0
-    return NextResponse.json({ hasChanges, changedFiles })
+    let behind = 0
+    try {
+      run('git fetch origin main')
+      const behindStr = run('git rev-list --count HEAD..origin/main')
+      behind = parseInt(behindStr) || 0
+    } catch { /* ignore fetch failures */ }
+    return NextResponse.json({ hasChanges, changedFiles, behind })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Failed to check status'
     return NextResponse.json({ error: msg }, { status: 500 })

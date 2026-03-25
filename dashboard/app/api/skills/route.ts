@@ -20,12 +20,33 @@ function parseModel(yaml: string): string {
   return match?.[1] || 'claude-sonnet-4-6'
 }
 
+function parseJsonrenderEnabled(yaml: string): boolean {
+  const match = yaml.match(/channels:\s*\n\s+jsonrender:\s*\n\s+enabled:\s*(true|false)/)
+  return match?.[1] === 'true'
+}
+
 function parseConfig(yaml: string): Record<string, { enabled: boolean; schedule: string; var: string; model: string }> {
   const skills: Record<string, { enabled: boolean; schedule: string; var: string; model: string }> = {}
-  const regex = / {2}([a-z][a-z0-9-]*):\s*\n((?:\s{4}\S.*\n)*)/g
+
+  // Support inline format: skill-name: { enabled: true, schedule: "..." }
+  const inlineRegex = /^ {2}([a-z][a-z0-9-]*):\s*\{([^}]+)\}/gm
   let match
-  while ((match = regex.exec(yaml)) !== null) {
+  while ((match = inlineRegex.exec(yaml)) !== null) {
     const name = match[1]
+    const block = match[2]
+    skills[name] = {
+      enabled: /enabled:\s*true/.test(block),
+      schedule: block.match(/schedule:\s*"([^"]*)"/)?.[ 1] || '',
+      var: block.match(/var:\s*"([^"]*)"/)?.[ 1] || '',
+      model: block.match(/model:\s*"([^"]*)"/)?.[ 1] || '',
+    }
+  }
+
+  // Support multi-line format: skill-name:\n    enabled: true\n    schedule: "..."
+  const multilineRegex = / {2}([a-z][a-z0-9-]*):\s*\n((?:\s{4}\S.*\n)*)/g
+  while ((match = multilineRegex.exec(yaml)) !== null) {
+    const name = match[1]
+    if (skills[name]) continue // inline already parsed
     const block = match[2]
     skills[name] = {
       enabled: /enabled:\s*true/.test(block),
@@ -87,7 +108,8 @@ export async function GET() {
 
     const model = parseModel(configResult.content)
     const repo = getRepoSlug()
-    return NextResponse.json({ skills, model, repo })
+    const jsonrenderEnabled = parseJsonrenderEnabled(configResult.content)
+    return NextResponse.json({ skills, model, repo, jsonrenderEnabled })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })
@@ -96,82 +118,112 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { name, enabled, schedule, var: skillVar, model, skillModel } = await request.json()
+    const { name, enabled, schedule, var: skillVar, model, skillModel, jsonrenderEnabled } = await request.json()
     const { content, sha } = await getFileContent('aeon.yml')
     let updated = content
+
+    // Update jsonrender enabled flag
+    if (typeof jsonrenderEnabled === 'boolean') {
+      const hasChannels = /channels:\s*\n\s+jsonrender:\s*\n\s+enabled:\s*(true|false)/.test(updated)
+      if (hasChannels) {
+        updated = updated.replace(
+          /(channels:\s*\n\s+jsonrender:\s*\n\s+enabled:\s*)(true|false)/,
+          `$1${jsonrenderEnabled}`
+        )
+      } else {
+        // Append channels section before telegram section or at end
+        const channelsBlock = `\n# Output channels\nchannels:\n  jsonrender:\n    enabled: ${jsonrenderEnabled}\n`
+        const telegramIdx = updated.indexOf('\ntelegram:')
+        if (telegramIdx !== -1) {
+          updated = updated.slice(0, telegramIdx) + channelsBlock + updated.slice(telegramIdx)
+        } else {
+          updated += channelsBlock
+        }
+      }
+    }
 
     // Update top-level model field
     if (typeof model === 'string' && model) {
       updated = updated.replace(/^model:\s*\S+/m, `model: ${model}`)
     }
 
-    if (typeof enabled === 'boolean') {
-      const re = new RegExp(`(  ${escapeRe(name)}:\\n    enabled: )(true|false)`)
-      updated = updated.replace(re, `$1${enabled}`)
-    }
-
-    if (typeof schedule === 'string' && schedule) {
-      const re = new RegExp(
-        `(  ${escapeRe(name)}:\\n    enabled: (?:true|false)\\n    schedule: ")[^"]*"`,
-      )
-      updated = updated.replace(re, `$1${schedule}"`)
-    }
-
-    if (typeof skillVar === 'string') {
+    if (name && (typeof enabled === 'boolean' || typeof schedule === 'string' || typeof skillVar === 'string' || typeof skillModel === 'string')) {
       const escaped = escapeRe(name)
-      const hasVar = new RegExp(`  ${escaped}:[\\s\\S]*?var: "`)
-      if (hasVar.test(updated)) {
-        // Update existing var line
-        const re = new RegExp(
-          `(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*"\\n    var: ")[^"]*"`,
-        )
-        updated = updated.replace(re, `$1${skillVar}"`)
-      } else if (skillVar) {
-        // Add var line after schedule
-        const re = new RegExp(
-          `(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*")`,
-        )
-        updated = updated.replace(re, `$1\n    var: "${skillVar}"`)
-      }
-    }
+      // Match inline format:  skill-name: { enabled: true, schedule: "...", var: "..." }
+      const inlineRe = new RegExp(`(  ${escaped}:\\s*)\\{([^}]+)\\}`)
+      const inlineMatch = updated.match(inlineRe)
 
-    // Per-skill model override
-    if (typeof skillModel === 'string') {
-      const escaped = escapeRe(name)
-      const hasModel = new RegExp(`  ${escaped}:[\\s\\S]*?model: "`)
-      if (hasModel.test(updated)) {
-        if (skillModel) {
-          // Update existing model line
-          const re = new RegExp(
-            `(  ${escaped}:\\n(?:    \\S.*\\n)*?    model: ")[^"]*"`,
-          )
-          updated = updated.replace(re, `$1${skillModel}"`)
-        } else {
-          // Remove model line (reset to global default)
-          const re = new RegExp(
-            `(  ${escaped}:\\n(?:    \\S.*\\n)*?)    model: "[^"]*"\\n`,
-          )
-          updated = updated.replace(re, '$1')
+      if (inlineMatch) {
+        let block = inlineMatch[2]
+        if (typeof enabled === 'boolean') {
+          block = block.replace(/enabled:\s*(true|false)/, `enabled: ${enabled}`)
         }
-      } else if (skillModel) {
-        // Add model line after schedule (or after var if present)
-        const hasVar = new RegExp(`  ${escaped}:[\\s\\S]*?var: "`)
-        if (hasVar.test(updated)) {
-          const re = new RegExp(
-            `(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*"\\n    var: "[^"]*")`,
-          )
-          updated = updated.replace(re, `$1\n    model: "${skillModel}"`)
-        } else {
-          const re = new RegExp(
-            `(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*")`,
-          )
-          updated = updated.replace(re, `$1\n    model: "${skillModel}"`)
+        if (typeof schedule === 'string' && schedule) {
+          block = block.replace(/schedule:\s*"[^"]*"/, `schedule: "${schedule}"`)
+        }
+        if (typeof skillVar === 'string') {
+          if (/var:\s*"/.test(block)) {
+            block = block.replace(/var:\s*"[^"]*"/, skillVar ? `var: "${skillVar}"` : '')
+            block = block.replace(/,\s*,/g, ',').replace(/\{\s*,/, '{').replace(/,\s*\}/, '}').replace(/,(\s*)$/, '$1')
+          } else if (skillVar) {
+            block = block.replace(/\s*$/, `, var: "${skillVar}"`)
+          }
+        }
+        if (typeof skillModel === 'string') {
+          if (/model:\s*"/.test(block)) {
+            block = block.replace(/model:\s*"[^"]*"/, skillModel ? `model: "${skillModel}"` : '')
+            block = block.replace(/,\s*,/g, ',').replace(/\{\s*,/, '{').replace(/,\s*\}/, '}').replace(/,(\s*)$/, '$1')
+          } else if (skillModel) {
+            block = block.replace(/\s*$/, `, model: "${skillModel}"`)
+          }
+        }
+        updated = updated.replace(inlineRe, `$1{${block}}`)
+      } else {
+        // Multi-line format fallback
+        if (typeof enabled === 'boolean') {
+          const re = new RegExp(`(  ${escaped}:\\n    enabled: )(true|false)`)
+          updated = updated.replace(re, `$1${enabled}`)
+        }
+        if (typeof schedule === 'string' && schedule) {
+          const re = new RegExp(`(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: ")[^"]*"`)
+          updated = updated.replace(re, `$1${schedule}"`)
+        }
+        if (typeof skillVar === 'string') {
+          const hasVar = new RegExp(`  ${escaped}:[\\s\\S]*?var: "`)
+          if (hasVar.test(updated)) {
+            const re = new RegExp(`(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*"\\n    var: ")[^"]*"`)
+            updated = updated.replace(re, `$1${skillVar}"`)
+          } else if (skillVar) {
+            const re = new RegExp(`(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*")`)
+            updated = updated.replace(re, `$1\n    var: "${skillVar}"`)
+          }
+        }
+        if (typeof skillModel === 'string') {
+          const hasModel = new RegExp(`  ${escaped}:[\\s\\S]*?model: "`)
+          if (hasModel.test(updated)) {
+            if (skillModel) {
+              const re = new RegExp(`(  ${escaped}:\\n(?:    \\S.*\\n)*?    model: ")[^"]*"`)
+              updated = updated.replace(re, `$1${skillModel}"`)
+            } else {
+              const re = new RegExp(`(  ${escaped}:\\n(?:    \\S.*\\n)*?)    model: "[^"]*"\\n`)
+              updated = updated.replace(re, '$1')
+            }
+          } else if (skillModel) {
+            const hasVar = new RegExp(`  ${escaped}:[\\s\\S]*?var: "`)
+            if (hasVar.test(updated)) {
+              const re = new RegExp(`(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*"\\n    var: "[^"]*")`)
+              updated = updated.replace(re, `$1\n    model: "${skillModel}"`)
+            } else {
+              const re = new RegExp(`(  ${escaped}:\\n    enabled: (?:true|false)\\n    schedule: "[^"]*")`)
+              updated = updated.replace(re, `$1\n    model: "${skillModel}"`)
+            }
+          }
         }
       }
     }
 
     if (updated !== content) {
-      const msg = model ? `chore: set model to ${model}` : `chore: update ${name} config`
+      const msg = model ? `chore: set model to ${model}` : typeof jsonrenderEnabled === 'boolean' ? `chore: ${jsonrenderEnabled ? 'enable' : 'disable'} json-render channel` : `chore: update ${name} config`
       await updateFile('aeon.yml', updated, sha, msg)
     }
 
@@ -195,8 +247,16 @@ export async function DELETE(request: Request) {
     // Remove from aeon.yml
     try {
       const { content, sha } = await getFileContent('aeon.yml')
-      const re = new RegExp(`  ${escapeRe(name)}:\\n(?:    \\S.*\\n)*(?:\\n(?=  [a-z]|  #|\\n|[a-z]|$))?`)
-      const updated = content.replace(re, '')
+      // Match inline format:  skill-name: { ... }  # optional comment\n
+      const inlineRe = new RegExp(`  ${escapeRe(name)}:\\s*\\{[^}]*\\}[^\\n]*\\n?`)
+      // Match multi-line format
+      const multiRe = new RegExp(`  ${escapeRe(name)}:\\n(?:    \\S.*\\n)*(?:\\n(?=  [a-z]|  #|\\n|[a-z]|$))?`)
+      let updated = content
+      if (inlineRe.test(updated)) {
+        updated = updated.replace(inlineRe, '')
+      } else {
+        updated = updated.replace(multiRe, '')
+      }
       if (updated !== content) {
         await updateFile('aeon.yml', updated, sha, `chore: remove ${name} from config`)
       }

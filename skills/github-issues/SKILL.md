@@ -33,11 +33,7 @@ Read the last 2 days of memory/logs/ to avoid repeating items.
    repo-name: #N Issue title (@author)
    repo-name: #M Another issue (@author)
    ```
-   If no new issues across any repo, send:
-   ```
-   *GitHub Issues — ${today}*
-   No new issues across all repos.
-   ```
+   If no new issues across any repo, **skip the notification entirely** — do not send anything.
 
 5. Log to memory/logs/${today}.md.
    If no new issues, log "GITHUB_ISSUES_OK" and end.
