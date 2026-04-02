@@ -61,6 +61,9 @@ skills:
   # --- Feed generation (5:30 PM UTC, after content skills) ---
   rss-feed: { enabled: false, schedule: "30 17 * * *" }
 
+  # --- Gallery update (Sunday 6 PM UTC, after content week) ---
+  update-gallery: { enabled: false, schedule: "0 18 * * 0" }
+
   # --- Evening / meta (6 PM UTC) ---
   goal-tracker: { enabled: false, schedule: "0 18 * * *" }
   skill-health: { enabled: false, schedule: "0 18 * * *" }

@@ -2,7 +2,7 @@
   "version": "1.0",
   "generated": "2026-03-28T00:00:00Z",
   "repo": "aaronjmars/aeon",
-  "total": 50,
+  "total": 51,
   "categories": {
     "research": "Research & Content",
     "dev": "Dev & Code",
@@ -510,6 +510,16 @@
       "var": "",
       "files": 0,
       "install": "./add-skill aaronjmars/aeon startup-idea"
+    },
+    {
+      "slug": "update-gallery",
+      "name": "Update Gallery",
+      "description": "Sync articles to the GitHub Pages gallery with proper Jekyll frontmatter",
+      "category": "productivity",
+      "schedule": "0 18 * * 0",
+      "var": "",
+      "files": 1,
+      "install": "./add-skill aaronjmars/aeon update-gallery"
     }
   ],
   "install_all": "./add-skill aaronjmars/aeon --all",
