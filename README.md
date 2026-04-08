@@ -221,6 +221,36 @@ model: claude-opus-4-6
 
 You can change it from the dashboard header dropdown. Options: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. Per-run overrides are also available via workflow dispatch.
 
+### Bankr Gateway (optional)
+
+Route all Claude Code requests through [Bankr LLM Gateway](https://docs.bankr.bot/llm-gateway/overview) for multi-model access and cost optimization. Bankr routes Claude through Vertex AI (~67% cheaper for Opus) and adds access to Gemini, GPT, Kimi, and Qwen models through a single API.
+
+**Setup:**
+
+1. Get an API key at [bankr.bot/api](https://bankr.bot/api)
+2. Top up credits at [bankr.bot/llm?tab=credits](https://bankr.bot/llm?tab=credits) (USDC, ETH, or BNKR on Base)
+3. Add `BANKR_LLM_KEY` as a repo secret (value: `bk_your_key`)
+4. Set the gateway provider in `aeon.yml`:
+
+```yaml
+gateway:
+  provider: bankr
+```
+
+**Key Permissions:** Your API key must have **LLM Gateway** enabled at [bankr.bot/api](https://bankr.bot/api). The Read Only toggle only affects the Agent API — LLM Gateway access is always available when enabled. A key used only for LLM Gateway doesn't need Agent API enabled. See [Access Control](https://docs.bankr.bot/llm-gateway/overview) for full details.
+
+**Available models (via Bankr):**
+
+| Provider | Models |
+|----------|--------|
+| Anthropic | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001` |
+| Google | `gemini-3-pro`, `gemini-3-flash` |
+| OpenAI | `gpt-5.2` |
+| Moonshot AI | `kimi-k2.5` |
+| Alibaba | `qwen3-coder` |
+
+Non-Claude models are available in the workflow dispatch dropdown and per-skill model overrides when gateway is set to `bankr`. Set `provider: direct` (the default) to use the standard Anthropic API.
+
 ### Changing check frequency
 
 Edit `.github/workflows/messages.yml`:

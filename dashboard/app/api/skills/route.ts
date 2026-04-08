@@ -80,7 +80,7 @@ export async function GET() {
     })
 
     const repo = getRepoSlug()
-    return NextResponse.json({ skills, model: config.model, repo, jsonrenderEnabled: config.jsonrenderEnabled })
+    return NextResponse.json({ skills, model: config.model, gateway: config.gateway, repo, jsonrenderEnabled: config.jsonrenderEnabled })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })

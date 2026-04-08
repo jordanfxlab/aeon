@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [runs, setRuns] = useState<Run[]>([])
   const [secrets, setSecrets] = useState<Secret[]>([])
   const [model, setModel] = useState('claude-sonnet-4-6')
+  const [gateway, setGateway] = useState<'direct' | 'bankr'>('direct')
   const [repo, setRepo] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -49,7 +50,7 @@ export default function Dashboard() {
 
   // --- API ---
   const fetchData = useCallback(async () => {
-    try { const [sr, rr, secr] = await Promise.all([fetch('/api/skills'), fetch('/api/runs'), fetch('/api/secrets')]); if (sr.ok) { const d = await sr.json(); setSkills(d.skills); if (d.model) setModel(d.model); if (d.repo) setRepo(d.repo) }; if (rr.ok) setRuns((await rr.json()).runs); if (secr.ok) { const d = await secr.json(); if (d.secrets) setSecrets(d.secrets) } } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to connect') } finally { setLoading(false) }
+    try { const [sr, rr, secr] = await Promise.all([fetch('/api/skills'), fetch('/api/runs'), fetch('/api/secrets')]); if (sr.ok) { const d = await sr.json(); setSkills(d.skills); if (d.model) setModel(d.model); if (d.gateway?.provider) setGateway(d.gateway.provider); if (d.repo) setRepo(d.repo) }; if (rr.ok) setRuns((await rr.json()).runs); if (secr.ok) { const d = await secr.json(); if (d.secrets) setSecrets(d.secrets) } } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed to connect') } finally { setLoading(false) }
     try { const r = await fetch('/api/sync'); if (r.ok) { const d = await r.json(); setHasChanges(d.hasChanges); if (typeof d.behind === 'number') setBehind(d.behind) } } catch {}
     try { const r = await fetch('/api/auth'); if (r.ok) setAuthStatus(await r.json()) } catch {}
   }, [])
@@ -95,7 +96,7 @@ export default function Dashboard() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar
-          skill={skill} view={view} repo={repo} model={model}
+          skill={skill} view={view} repo={repo} model={model} gateway={gateway}
           authStatus={authStatus} authLoading={authLoading}
           pulling={pulling} syncing={syncing} hasChanges={hasChanges} behind={behind}
           onSetupAuth={() => setupAuth()} onUpdateModel={updateModel}
