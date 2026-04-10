@@ -1,0 +1,10 @@
+{
+  "name": "aeon",
+  "private": true,
+  "description": "Proxy scripts — app lives in dashboard/",
+  "scripts": {
+    "dev": "npm run dev --prefix dashboard -- -p 5555",
+    "build": "npm run build --prefix dashboard",
+    "start": "npm run start --prefix dashboard"
+  }
+}
