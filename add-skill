@@ -232,6 +232,33 @@ for skill in "${SKILL_NAMES[@]}"; do
   cp -r "$src" "$dest"
   INSTALLED=$((INSTALLED + 1))
 
+  # Record provenance in skills.lock
+  LOCK_FILE="$(cd "$(dirname "$0")" && pwd)/skills.lock"
+  SKILL_REMOTE_PATH="skills/$skill/SKILL.md"
+  COMMIT_SHA=$(gh api "repos/$REPO/commits" -f path="$SKILL_REMOTE_PATH" --jq '.[0].sha' 2>/dev/null || echo "unknown")
+  IMPORTED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+  # Initialize lock file if missing or empty
+  if [[ ! -f "$LOCK_FILE" ]] || [[ ! -s "$LOCK_FILE" ]]; then
+    echo "[]" > "$LOCK_FILE"
+  fi
+
+  # Build new entry and upsert into lock file (replace existing entry for this skill)
+  NEW_ENTRY=$(jq -n \
+    --arg name "$skill" \
+    --arg repo "$REPO" \
+    --arg path "$SKILL_REMOTE_PATH" \
+    --arg branch "$BRANCH" \
+    --arg sha "$COMMIT_SHA" \
+    --arg at "$IMPORTED_AT" \
+    '{skill_name: $name, source_repo: $repo, source_path: $path, branch: $branch, commit_sha: $sha, imported_at: $at}')
+
+  jq --argjson entry "$NEW_ENTRY" \
+    '[.[] | select(.skill_name != $entry.skill_name)] + [$entry]' \
+    "$LOCK_FILE" > "${LOCK_FILE}.tmp" && mv "${LOCK_FILE}.tmp" "$LOCK_FILE"
+
+  echo "    -> provenance recorded in skills.lock (sha: ${COMMIT_SHA:0:7})"
+
   # Add to aeon.yml if not already present
   if ! grep -q "^  $skill:" "$AEON_YML" 2>/dev/null; then
     # Insert before the heartbeat entry (fallback section)
