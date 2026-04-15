@@ -118,22 +118,34 @@ echo ""
 # ── Print sample config ───────────────────────────────────────────────────────
 
 if [[ "$PRINT_CONFIG" == "true" ]]; then
-  echo "── LangChain / OpenAI Agents (A2A client) ──────────────────"
+  echo "── Plain HTTP (works with any language/framework) ──────────"
   cat <<EOF
-# Install: pip install a2a-sdk  (or use any A2A-compatible client)
-import a2a
+# No SDK required — A2A is just HTTP + JSON-RPC.
+# Use requests, httpx, fetch, curl, or any HTTP client.
+import requests, uuid
 
-client = a2a.Client("${URL}")
-card   = client.get_agent_card()       # discovers all ${SKILL_COUNT} skills
+task_id = str(uuid.uuid4())
+resp = requests.post("${URL}/", json={
+    "jsonrpc": "2.0", "id": 1, "method": "tasks/send",
+    "params": {
+        "id": task_id,
+        "skillId": "aeon-deep-research",
+        "var": "AI agent frameworks 2025",
+        "message": {"role": "user", "parts": [{"type": "text", "text": "Run aeon-deep-research"}]}
+    }
+}).json()
 
-# Invoke a skill (async — poll with tasks/get or use SSE):
-task = client.send_task(
-    skill_id="aeon-deep-research",
-    message="Run aeon-deep-research",
-    var="AI agent frameworks 2025",
-)
-result = client.wait_for_task(task["id"])
-print(result["artifacts"][0]["parts"][0]["text"])
+# Poll for completion:
+import time
+for _ in range(120):
+    time.sleep(5)
+    status = requests.post("${URL}/", json={
+        "jsonrpc": "2.0", "id": 2, "method": "tasks/get",
+        "params": {"id": task_id}
+    }).json()
+    if status["result"]["status"]["state"] == "completed":
+        print(status["result"]["artifacts"][0]["parts"][0]["text"])
+        break
 
 EOF
 

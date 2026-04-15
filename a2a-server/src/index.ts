@@ -22,7 +22,7 @@ import { createServer, IncomingMessage, ServerResponse } from "http";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,6 +83,8 @@ interface Task {
   metadata?: Record<string, unknown>;
   skillSlug?: string;
   _subscribers: ServerResponse[];
+  _childProcess?: ChildProcess;
+  _completedAt?: number;
 }
 
 interface JsonRpcRequest {
@@ -96,6 +98,28 @@ interface JsonRpcRequest {
 
 const tasks = new Map<string, Task>();
 const skills = loadSkills();
+
+const TASK_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_TASKS = 1000;
+
+function evictStaleTasks(): void {
+  const now = Date.now();
+  for (const [id, task] of tasks) {
+    if (task._completedAt && now - task._completedAt > TASK_TTL_MS) {
+      tasks.delete(id);
+    }
+  }
+  // Hard cap: if still over limit, drop oldest completed tasks
+  if (tasks.size > MAX_TASKS) {
+    const completed = [...tasks.entries()]
+      .filter(([, t]) => t._completedAt)
+      .sort((a, b) => (a[1]._completedAt ?? 0) - (b[1]._completedAt ?? 0));
+    for (const [id] of completed) {
+      tasks.delete(id);
+      if (tasks.size <= MAX_TASKS) break;
+    }
+  }
+}
 
 // ── Skill loading ─────────────────────────────────────────────────────────────
 
@@ -160,6 +184,7 @@ function runSkillAsync(task: Task, slug: string, varValue: string): void {
     cwd: REPO_ROOT,
     env: { ...process.env },
   });
+  task._childProcess = child;
 
   child.stdin.write(prompt);
   child.stdin.end();
@@ -201,6 +226,8 @@ function completeTask(task: Task, state: TaskState, text: string): void {
   const msg: A2AMessage = { role: "agent", parts: [{ type: "text", text }] };
   task.status = { state, timestamp: new Date().toISOString() };
   task.history.push(msg);
+  task._completedAt = Date.now();
+  task._childProcess = undefined;
 
   if (state === "completed") {
     task.artifacts = [{ mimeType: "text/plain", parts: [{ type: "text", text }] }];
@@ -240,7 +267,7 @@ function buildAgentCard(): Record<string, unknown> {
   return {
     name: "Aeon",
     description:
-      "Background intelligence agent with 68+ skills across research, dev tooling, " +
+      `Background intelligence agent with ${skills.length} skills across research, dev tooling, ` +
       "crypto monitoring, and productivity. Runs on GitHub Actions — always available, " +
       "no infra required.",
     url: SERVER_URL,
@@ -326,6 +353,7 @@ function handleTasksSend(params: Record<string, unknown>): RpcResult<Task> {
     _subscribers: [],
   };
   tasks.set(id, task);
+  evictStaleTasks();
 
   // Kick off async — return submitted state immediately
   setImmediate(() => runSkillAsync(task, slug!, varValue));
@@ -352,6 +380,9 @@ function handleTasksCancel(params: Record<string, unknown>): RpcResult<Record<st
     return { error: { code: -32602, message: `Task not found: ${id}` } };
   }
   if (task.status.state === "submitted" || task.status.state === "working") {
+    if (task._childProcess) {
+      task._childProcess.kill("SIGTERM");
+    }
     completeTask(task, "canceled", "Task canceled by caller.");
   }
   const { _subscribers: _, ...safe } = task;
@@ -360,10 +391,21 @@ function handleTasksCancel(params: Record<string, unknown>): RpcResult<Record<st
 
 // ── HTTP request handling ─────────────────────────────────────────────────────
 
+const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error("Request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
