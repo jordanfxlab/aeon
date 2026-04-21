@@ -15,7 +15,7 @@ on:
         default: '(config default)'
         options:
           - '(config default)'
-          - claude-opus-4-6
+          - claude-opus-4-7
           - claude-sonnet-4-6
           - claude-haiku-4-5-20251001
           - gemini-3-pro
@@ -77,7 +77,7 @@ jobs:
         if: github.event_name == 'issues'
         uses: actions/checkout@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_GLOBAL || secrets.GITHUB_TOKEN }}
 
       - name: Determine skill
         id: skill
@@ -102,7 +102,7 @@ jobs:
         if: steps.work.outputs.mode != ''
         uses: actions/checkout@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_GLOBAL || secrets.GITHUB_TOKEN }}
 
       - name: Configure git identity
         if: steps.work.outputs.mode != ''
@@ -157,6 +157,28 @@ jobs:
           [ ${#MISSING[@]} -gt 0 ] && echo "::warning::Secrets not set: ${MISSING[*]} — skill may fail or produce incomplete results"
           exit 0
 
+      - name: Run pre-fetch scripts
+        if: steps.work.outputs.mode != ''
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          SKILL_VAR: ${{ inputs.var }}
+        run: |
+          # Run all scripts/prefetch-*.sh before Claude starts (outside sandbox).
+          # Each script receives the skill name and var as arguments.
+          # Scripts should check their own env vars and exit 0 if not configured.
+          # SKILL_VAR comes through env (not template interpolation) so embedded
+          # $TOKEN / $VAR references in the user input aren't eaten by bash.
+          SKILL="${{ steps.skill.outputs.name }}"
+          VAR="$SKILL_VAR"
+          for script in scripts/prefetch-*.sh; do
+            [ -f "$script" ] || continue
+            chmod +x "$script"
+            echo "Running $(basename "$script")..."
+            ./"$script" "$SKILL" "$VAR" || echo "::notice::$(basename "$script") skipped or failed (non-fatal)"
+          done
+
       - name: Run
         id: run
         if: steps.work.outputs.mode != ''
@@ -174,9 +196,18 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          NOTIFY_EMAIL_TO: ${{ secrets.NOTIFY_EMAIL_TO }}
+          NOTIFY_EMAIL_FROM: ${{ vars.NOTIFY_EMAIL_FROM || 'aeon@notifications.aeon.bot' }}
+          NOTIFY_EMAIL_SUBJECT_PREFIX: ${{ vars.NOTIFY_EMAIL_SUBJECT_PREFIX || '[Aeon]' }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
           ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+          BANKR_API_KEY: ${{ secrets.BANKR_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+          NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
+          NEYNAR_SIGNER_UUID: ${{ secrets.NEYNAR_SIGNER_UUID }}
           JSONRENDER_ENABLED: ${{ vars.JSONRENDER_ENABLED || 'true' }}
           SKILL_VAR: ${{ inputs.var }}
         run: |
@@ -192,7 +223,7 @@ jobs:
           elif [ -n "$SKILL_MODEL" ]; then
             MODEL="$SKILL_MODEL"
           else
-            MODEL="${CONFIG_MODEL:-claude-opus-4-6}"
+            MODEL="${CONFIG_MODEL:-claude-opus-4-7}"
           fi
           echo "Using model: $MODEL"
           echo "SKILL_MODEL=$MODEL" >> "$GITHUB_OUTPUT"
@@ -219,47 +250,140 @@ jobs:
           fi
 
           # Generate notify script in workspace (Claude calls: ./notify "message")
+          # Messages are saved to .pending-notify/ for reliable post-run delivery
+          # (sandbox may block outbound curl during Claude's run)
+          # Pre-create .pending-notify/ so the sandbox doesn't block Claude's first write into it
+          mkdir -p .pending-notify
+          : > .notify-sent-hashes
+
           cat > ./notify << 'NOTIFY_SCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
           MSG="$1"
 
+          # Suppress obvious diagnostic probes (short messages containing test/trace/ping/debug/hello).
+          # Claude sometimes issues these to verify the notify script works — they should not reach channels.
+          MSG_LEN=${#MSG}
+          if [ "$MSG_LEN" -lt 120 ]; then
+            MSG_LOWER=$(printf '%s' "$MSG" | tr '[:upper:]' '[:lower:]')
+            case "$MSG_LOWER" in
+              *test*|*trace*|*ping*|*debug*|hello|hi)
+                echo "notify: suppressing trace/test message ($MSG_LEN chars): $MSG" >&2
+                exit 0
+                ;;
+            esac
+          fi
+
+          # Dedup within this workflow run — same message never sent twice even if ./notify is called again
+          HASH=$(printf '%s' "$MSG" | sha256sum | awk '{print $1}')
+          HASH_FILE=".notify-sent-hashes"
+          touch "$HASH_FILE" 2>/dev/null || true
+          if [ -f "$HASH_FILE" ] && grep -qxF "$HASH" "$HASH_FILE" 2>/dev/null; then
+            echo "notify: duplicate message (hash ${HASH:0:8}), skipping" >&2
+            exit 0
+          fi
+          printf '%s\n' "$HASH" >> "$HASH_FILE" 2>/dev/null || true
+
+          # Always save to .pending-notify/ for post-run delivery (sandbox fallback)
+          TS=$(date -u +%s)
+          echo "$MSG" > ".pending-notify/${TS}.md"
+
+          # Attempt immediate delivery (may fail in sandbox — post-run step retries)
+          DELIVERED=false
+
           # Telegram: 4096 char limit, strict Markdown parsing
           if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
-            TG_MSG="$MSG"
-            # Truncate to 4000 chars (leave room for truncation notice)
-            if [ ${#TG_MSG} -gt 4000 ]; then
-              TG_MSG="${TG_MSG:0:3990}
-
-          ...(truncated)"
-            fi
-            # Try Markdown first, fall back to plain text if it fails
-            TG_RESULT=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg chat "$TELEGRAM_CHAT_ID" --arg text "$TG_MSG" '{chat_id: $chat, text: $text, parse_mode: "Markdown"}')" 2>/dev/null)
-            TG_HTTP=$(echo "$TG_RESULT" | tail -1)
-            TG_OK=$(echo "$TG_RESULT" | sed '$d' | jq -r '.ok // false' 2>/dev/null || echo "false")
-            if [ "$TG_HTTP" != "200" ] || [ "$TG_OK" != "true" ]; then
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            # Split $MSG into chunks ≤3900 chars (Telegram cap 4096, leaves room for
+            # "[i/N]" suffix). Prefer paragraph (\n\n) then line (\n) boundaries,
+            # hard-split only if a single paragraph/line exceeds the limit.
+            # Chunks emitted one per line as base64 to preserve embedded newlines.
+            TG_CHUNKS_B64=$(printf '%s' "$MSG" | python3 -c '
+          import sys, base64
+          LIMIT = 3900
+          text = sys.stdin.read()
+          def pack(parts, sep):
+              out, cur = [], ""
+              for p in parts:
+                  glue = sep if cur else ""
+                  if len(cur) + len(glue) + len(p) <= LIMIT:
+                      cur += glue + p
+                  else:
+                      if cur:
+                          out.append(cur); cur = ""
+                      if len(p) > LIMIT and sep == "\n\n":
+                          out.extend(pack(p.split("\n"), "\n"))
+                      elif len(p) > LIMIT:
+                          while len(p) > LIMIT:
+                              out.append(p[:LIMIT]); p = p[LIMIT:]
+                          cur = p
+                      else:
+                          cur = p
+              if cur:
+                  out.append(cur)
+              return out
+          chunks = [text] if len(text) <= LIMIT else pack(text.split("\n\n"), "\n\n")
+          N = len(chunks)
+          for i, c in enumerate(chunks):
+              suffix = f"\n\n[{i+1}/{N}]" if N > 1 else ""
+              sys.stdout.write(base64.b64encode((c + suffix).encode()).decode() + "\n")
+          ')
+            while IFS= read -r TG_CHUNK_B64; do
+              [ -z "$TG_CHUNK_B64" ] && continue
+              TG_MSG=$(printf '%s' "$TG_CHUNK_B64" | base64 -d)
+              TG_RESULT=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
                 -H "Content-Type: application/json" \
-                -d "$(jq -n --arg chat "$TELEGRAM_CHAT_ID" --arg text "$TG_MSG" '{chat_id: $chat, text: $text}')" > /dev/null 2>&1 || true
-            fi
+                -d "$(jq -n --arg chat "$TELEGRAM_CHAT_ID" --arg text "$TG_MSG" '{chat_id: $chat, text: $text, parse_mode: "Markdown"}')" 2>/dev/null) || true
+              TG_HTTP=$(echo "$TG_RESULT" | tail -1)
+              TG_OK=$(echo "$TG_RESULT" | sed '$d' | jq -r '.ok // false' 2>/dev/null || echo "false")
+              if [ "$TG_HTTP" = "200" ] && [ "$TG_OK" = "true" ]; then
+                DELIVERED=true
+              else
+                curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                  -H "Content-Type: application/json" \
+                  -d "$(jq -n --arg chat "$TELEGRAM_CHAT_ID" --arg text "$TG_MSG" '{chat_id: $chat, text: $text}')" > /dev/null 2>&1 && DELIVERED=true || true
+              fi
+              # Preserve chunk ordering in the Telegram channel
+              sleep 0.3
+            done <<< "$TG_CHUNKS_B64"
           fi
 
           if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
             curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d "$(jq -n --arg text "$MSG" '{content: $text}')" > /dev/null || true
+              -d "$(jq -n --arg text "$MSG" '{content: $text}')" > /dev/null && DELIVERED=true || true
           fi
           if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
             curl -sf -X POST "$SLACK_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d "$(jq -n --arg text "$MSG" '{text: $text}')" > /dev/null || true
+              -d "$(jq -n --arg text "$MSG" '{text: $text}')" > /dev/null && DELIVERED=true || true
+          fi
+          # Email via SendGrid
+          if [ -n "${SENDGRID_API_KEY:-}" ] && [ -n "${NOTIFY_EMAIL_TO:-}" ]; then
+            FROM="${NOTIFY_EMAIL_FROM:-aeon@notifications.aeon.bot}"
+            PREFIX="${NOTIFY_EMAIL_SUBJECT_PREFIX:-[Aeon]}"
+            SUBJECT="$PREFIX ${SKILL_NAME:-notification}"
+            HTML_BODY=$(printf '%s' "$MSG" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            HTML_BODY="<html><body><pre style=\"font-family:monospace;white-space:pre-wrap;\">${HTML_BODY}</pre></body></html>"
+            curl -sf -X POST "https://api.sendgrid.com/v3/mail/send" \
+              -H "Authorization: Bearer ${SENDGRID_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n \
+                --arg from "$FROM" \
+                --arg to "$NOTIFY_EMAIL_TO" \
+                --arg subject "$SUBJECT" \
+                --arg html "$HTML_BODY" \
+                --arg text "$MSG" \
+                '{personalizations:[{to:[{email:$to}]}],from:{email:$from},subject:$subject,content:[{type:"text/plain",value:$text},{type:"text/html",value:$html}]}')" > /dev/null 2>&1 || true
           fi
           # json-render channel — save raw message for post-run conversion
           if [ "${JSONRENDER_ENABLED:-false}" = "true" ] && [ -n "${SKILL_NAME:-}" ]; then
             mkdir -p dashboard/outputs
             echo "$MSG" > "dashboard/outputs/.pending-${SKILL_NAME}.md"
+          fi
+
+          # Remove pending file if immediate delivery succeeded (prevents double-send)
+          if [ "$DELIVERED" = "true" ]; then
+            rm -f ".pending-notify/${TS}.md"
           fi
           NOTIFY_SCRIPT
           chmod +x ./notify
@@ -490,12 +614,102 @@ jobs:
             ./notify-jsonrender "$SKILL" "$(cat "$pending")" && rm -f "$pending" || echo "json-render: $SKILL conversion failed (non-fatal)"
           done
 
+      - name: Send pending notifications
+        if: steps.work.outputs.mode != '' && steps.run.outcome == 'success'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          NOTIFY_EMAIL_TO: ${{ secrets.NOTIFY_EMAIL_TO }}
+          NOTIFY_EMAIL_FROM: ${{ vars.NOTIFY_EMAIL_FROM || 'aeon@notifications.aeon.bot' }}
+          NOTIFY_EMAIL_SUBJECT_PREFIX: ${{ vars.NOTIFY_EMAIL_SUBJECT_PREFIX || '[Aeon]' }}
+          SKILL_NAME: ${{ steps.skill.outputs.name }}
+        run: |
+          # Re-deliver any .pending-notify/ messages that failed during sandbox.
+          # Skip messages whose hash was already sent by ./notify inline,
+          # and skip short test/trace probes that shouldn't reach channels.
+          if [ ! -d .pending-notify ] || [ -z "$(ls -A .pending-notify/*.md 2>/dev/null)" ]; then
+            echo "No pending notifications"
+            exit 0
+          fi
+          HASH_FILE=".notify-sent-hashes"
+          touch "$HASH_FILE"
+          for pending in .pending-notify/*.md; do
+            [ -f "$pending" ] || continue
+            MSG=$(cat "$pending")
+
+            # Suppress trivial probes
+            MSG_LEN=${#MSG}
+            if [ "$MSG_LEN" -lt 120 ]; then
+              MSG_LOWER=$(printf '%s' "$MSG" | tr '[:upper:]' '[:lower:]')
+              case "$MSG_LOWER" in
+                *test*|*trace*|*ping*|*debug*|hello|hi)
+                  echo "Skipping pending trace/test message: $MSG"
+                  continue
+                  ;;
+              esac
+            fi
+
+            # Dedup against messages already sent by ./notify inline
+            HASH=$(printf '%s' "$MSG" | sha256sum | awk '{print $1}')
+            if grep -qxF "$HASH" "$HASH_FILE" 2>/dev/null; then
+              echo "Skipping pending duplicate (${HASH:0:8}): $(basename "$pending")"
+              continue
+            fi
+            printf '%s\n' "$HASH" >> "$HASH_FILE"
+
+            echo "Delivering pending notification: $(basename "$pending")"
+            # Telegram
+            if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+              TG_MSG="$MSG"
+              [ ${#TG_MSG} -gt 4000 ] && TG_MSG="${TG_MSG:0:3990}...(truncated)"
+              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n --arg chat "$TELEGRAM_CHAT_ID" --arg text "$TG_MSG" '{chat_id: $chat, text: $text}')" > /dev/null 2>&1 || true
+            fi
+            # Discord
+            if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+              curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n --arg text "$MSG" '{content: $text}')" > /dev/null 2>&1 || true
+            fi
+            # Slack
+            if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+              curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n --arg text "$MSG" '{text: $text}')" > /dev/null 2>&1 || true
+            fi
+          done
+          rm -rf .pending-notify
+
+      - name: Run post-process scripts
+        if: steps.work.outputs.mode != '' && steps.run.outcome == 'success'
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+          NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
+          NEYNAR_SIGNER_UUID: ${{ secrets.NEYNAR_SIGNER_UUID }}
+        run: |
+          # Run all scripts/postprocess-*.sh after Claude finishes.
+          # Each script handles its own .pending-{service}/ directory
+          # and checks its own env vars. Exit 0 if nothing to do.
+          for script in scripts/postprocess-*.sh; do
+            [ -f "$script" ] || continue
+            chmod +x "$script"
+            echo "Running $(basename "$script")..."
+            ./"$script" || echo "::notice::$(basename "$script") failed (non-fatal)"
+          done
+
       - name: Commit results
         if: steps.work.outputs.mode != ''
         run: |
           git config user.name "aeonframework"
           git config user.email "aeonframework@proton.me"
-          rm -f ./notify  # Remove generated script before committing
+          rm -f ./notify .notify-sent-hashes  # Remove generated notify script + dedup log before committing
 
           CURRENT_BRANCH=$(git branch --show-current)
           LABEL="${{ steps.work.outputs.label }}"
